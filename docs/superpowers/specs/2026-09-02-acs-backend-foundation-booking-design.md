@@ -453,6 +453,28 @@ On success, `operators.presence` becomes `online`.
 
 `GET /operators/me/schedule?date=` returns the calling operator's own day: their active check-in windows, and every slot in them with its status — plus, for booked slots, the booking's id, status, `start_at`, session type name, and the customer's display name and phone. This is the operator app's home screen. It is scoped to `operator_id` from the access token, never a path parameter, so there is no object-level authorization surface to get wrong.
 
+### 5.2b Mid-day break
+
+`POST /operators/me/breaks { from, to }` withdraws availability for part of an already-active window, so an operator can take a break without ending their check-in.
+
+Availability is entirely a function of which `operator_slots` rows exist and are `open` — discovery (§5.3) reads slot rows and never consults `operators.presence` — so a break needs no new state. It cancels the affected rows:
+
+```sql
+UPDATE operator_slots SET status = 'cancelled'
+WHERE operator_id = :operator_id
+  AND status     = 'open'
+  AND start_at  >= :from
+  AND start_at   < :to
+```
+
+Guards: `from` and `to` are grid-aligned with `to > from`, and the range lies inside one of the operator's active check-in windows.
+
+**Booked slots in the range reject the request with 409 and the list of conflicting bookings.** This mirrors §5.2: check-out cancels only `open` slots and booked ones survive. If a break could quietly dissolve a booking, it would become a backdoor around the rule that abandoning a committed customer is an explicit, auditable act. The operator cancels those bookings individually (§5.5) and then takes the break.
+
+Returning early needs no separate mechanism: the operator checks in again (§5.1) for the remainder of the break. Because `one_session_per_operator_per_tick` excludes `cancelled` rows, fresh `open` rows for those ticks insert cleanly — and if the operator had meanwhile checked in elsewhere for them, the index rejects it, which is the correct outcome.
+
+Break-cancelled slots are indistinguishable from checkout-cancelled ones, so availability lost to breaks is not reportable. That is accepted for MVP; a nullable `cancellation_reason` on `operator_slots` is a one-column migration whenever the analytics are wanted.
+
 ### 5.3 Discovery
 
 `GET /discovery/locations?lat=&lng=[&radius=]` returns active locations within `DISCOVERY_RADIUS_M` (default 300 m), joined to open-slot counts for today in the business timezone, and each location's minimum active price.
@@ -531,7 +553,7 @@ POST   /auth/logout-all
 
 GET    /operators/me                    PATCH  /operators/me
 POST   /operators/me/checkins           POST   /operators/me/checkins/:id/end
-GET    /operators/me/schedule
+POST   /operators/me/breaks             GET    /operators/me/schedule
 
 POST   /admin/operators                 GET    /admin/operators
 POST   /admin/operators/:id/approve     POST   /admin/operators/:id/suspend
