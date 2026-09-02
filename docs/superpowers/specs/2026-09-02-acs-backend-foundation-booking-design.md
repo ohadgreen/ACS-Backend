@@ -158,7 +158,7 @@ Zero rows returned means the slot is no longer available, matching the design's 
 
 ```sql
 CREATE TYPE user_role         AS ENUM ('customer','operator','admin');
-CREATE TYPE user_status       AS ENUM ('pending_setup','active','suspended');
+CREATE TYPE user_status       AS ENUM ('operator_pending_setup','active','suspended');
 CREATE TYPE operator_approval AS ENUM ('pending','approved','rejected','suspended');
 CREATE TYPE operator_presence AS ENUM ('offline','online','in_session');
 CREATE TYPE checkin_status    AS ENUM ('active','ended');
@@ -373,12 +373,26 @@ setup_tokens (
 | Role | Identity | Endpoints |
 |---|---|---|
 | Customer | Phone + OTP | `POST /auth/otp/request` → Twilio Verify sends; `POST /auth/otp/verify` → verifies, upserts user, issues tokens |
-| Operator | Email + password, invite-only | Admin creates the user (`status='pending_setup'`) → one-time link → `POST /auth/setup/:token` sets the password → `POST /auth/login` |
+| Operator | Email + password, invite-only | Admin creates the user (`status='operator_pending_setup'`) → one-time link → `POST /auth/setup/:token` sets the password → `POST /auth/login` |
 | Admin | Email + password | Provisioned by CLI seed only, never a signup route; same `POST /auth/login` |
 
 Phone numbers are normalized to E.164 (libphonenumber) before any storage or lookup. Skipping normalization does not merely create duplicate users — it defeats per-phone OTP rate limiting, because `0501234567` and `+972501234567` would count as different numbers.
 
 Passwords are hashed with **argon2id** at OWASP parameters: m=19 MiB, t=2, p=1.
+
+#### Operator invite lifecycle
+
+`user_status = 'operator_pending_setup'` is the invite waiting room: the account row exists, but no password has been set. Design §8 requires operators be provisioned by admin-issued invite rather than self-registration, so there is necessarily a window where the user record is real but unusable, and that window needs a name. The status is operator-only — customers are created `active` by OTP verify (there is no password to set), and admins are CLI-seeded with a password directly.
+
+| Step | Action | Result |
+|---|---|---|
+| 1 | Admin `POST /admin/operators` | `users`: `role='operator'`, `status='operator_pending_setup'`, `password_hash` NULL · `operators`: `approval_status='pending'` · `setup_tokens` row created, one-time link emailed |
+| 2 | Operator `POST /auth/setup/:token` | Token validated (unused, unexpired) → `password_hash` set → `status='active'` → `setup_tokens.used_at` stamped |
+| 3 | Admin `POST /admin/operators/:id/approve` | `operators.approval_status='approved'` |
+
+It is a status value rather than an inference from `password_hash IS NULL` because §4.2 step 2 re-checks `users.status = 'active'` on every refresh. One authoritative field means that single check covers all three reasons an identity cannot authenticate — never set up, suspended, deactivated — instead of the login path testing password nullability while the refresh path tests status, which is how those two drift apart. It also keeps *never activated* distinct from *suspended*, which call for different admin actions (resend invite vs. reinstate), and makes the invite backlog queryable.
+
+**`users.status` and `operators.approval_status` are two independent gates.** The first answers "can this identity authenticate?", the second "is this operator cleared to work?" An operator can legitimately be `active` + `pending`: they log in and complete their profile while §5.1's check-in guard keeps rejecting them until an admin approves. That combination is intended, not an edge case.
 
 ### 4.2 Tokens
 
