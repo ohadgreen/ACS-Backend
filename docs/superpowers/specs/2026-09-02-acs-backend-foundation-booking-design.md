@@ -96,6 +96,26 @@ Full hexagonal ports-and-adapters was rejected: for six domains it produces inte
 
 **Money.** `numeric(10,2)` with an explicit ISO-4217 `currency` column, defaulting to `ILS`. Never floating point.
 
+**Localization.** The system serves English and Hebrew. **Right-to-left is entirely a client concern** — the API emits no layout, so text direction, mirroring, and bidi rendering require nothing from the backend. Date, number, and currency formatting are likewise client-side; the backend emits ISO-8601 UTC timestamps and a `numeric` plus an explicit `currency` code.
+
+The backend's responsibility is narrower, and has two halves:
+
+1. **Text the backend originates**, which the client cannot localize after the fact — OTP SMS, the operator invite email, and later push notifications (#3). These are addressed by `users.preferred_locale` (§3.4).
+2. **Admin-authored display strings** stored in the database — location and session-type names and descriptions. These use a shared **`LocalizedText`** shape: a `jsonb` object keyed by locale, with a CHECK enforcing that every supported locale is present.
+
+```
+name jsonb NOT NULL CHECK (jsonb_exists(name,'en') AND jsonb_exists(name,'he'))
+-- {"en": "Beginner Slope", "he": "מסלול מתחילים"}
+```
+
+Use `jsonb_exists(col, 'en')` rather than the `col ? 'en'` operator: node-postgres parses `?` as a parameter placeholder, and the operator form will fail at runtime even though it is valid SQL.
+
+Adding a locale is then a data migration rather than a schema one — relevant given Arabic and Russian are plausible for a tourist-facing service in Israel.
+
+**Identity is separated from display.** Because display strings are now localized objects, they can no longer serve as keys. Every admin-curated entity carries a stable, never-localized `code` (a slug) that owns uniqueness, grouping, and client-side keying of icons and analytics.
+
+**Responses carry every locale**, rather than negotiating one via `Accept-Language`. The catalog is a handful of locations and session types, so the extra bytes are negligible, and switching language in-app refetches nothing.
+
 ---
 
 ## 3. Data model
@@ -179,6 +199,7 @@ users (
   password_hash     text,                     -- argon2id; operators/admins only
   display_name      text,                     -- nullable: OTP signup supplies no name
   status            user_status NOT NULL DEFAULT 'active',
+  preferred_locale  text NOT NULL DEFAULT 'he',   -- validated against SUPPORTED_LOCALES
   phone_verified_at timestamptz,
   created_at        timestamptz NOT NULL DEFAULT now(),
   updated_at        timestamptz NOT NULL DEFAULT now(),
@@ -218,20 +239,25 @@ operators (
 ```sql
 locations (
   id          uuid PRIMARY KEY,
-  site        text NOT NULL,                      -- e.g. "Hermon Ski Resort"
-  name        text NOT NULL,                      -- e.g. "Beginner Slope"
-  description text,
+  code        text NOT NULL UNIQUE,               -- stable slug, never localized
+  site_code   text NOT NULL,                      -- grouping key, never localized
+  site_name   jsonb NOT NULL,                     -- LocalizedText
+  name        jsonb NOT NULL,                     -- LocalizedText
+  description jsonb,                              -- LocalizedText, nullable
   geog        geography(Point,4326) NOT NULL,
   is_active   boolean NOT NULL DEFAULT true,
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (site, name)
+  CHECK (jsonb_exists(site_name,'en') AND jsonb_exists(site_name,'he')),
+  CHECK (jsonb_exists(name,'en')      AND jsonb_exists(name,'he'))
 )
 CREATE INDEX locations_geog_idx ON locations USING GIST (geog);
-CREATE INDEX locations_site_idx ON locations (site);
+CREATE INDEX locations_site_idx ON locations (site_code);
 ```
 
-`site` is a plain field, not a separate entity. Nothing in scope needs site-level attributes — discovery is geo, check-in is per-location, pricing is per-location. Promoting it to a table is a clean additive migration if site-level branding or reporting arrives.
+`code` replaces the previous `UNIQUE (site, name)`. Human-readable names are now `LocalizedText` objects and cannot serve as identity keys, so a stable slug owns uniqueness instead — a stricter guarantee, since it is global rather than per-site.
+
+The site is a pair of plain fields, not a separate entity: `site_code` groups and indexes, `site_name` displays. Nothing in scope needs site-level attributes — discovery is geo, check-in is per-location, pricing is per-location. Note that `site_name` is denormalized across every location at a site, so localizing it makes promoting site to its own table somewhat more attractive than before; it remains a clean additive migration whenever site-level branding or reporting arrives.
 
 **`location_session_types`** — per-location offering and price.
 
@@ -239,17 +265,21 @@ CREATE INDEX locations_site_idx ON locations (site);
 location_session_types (
   id          uuid PRIMARY KEY,
   location_id uuid NOT NULL REFERENCES locations(id),
-  name        text NOT NULL,
-  description text,
+  code        text NOT NULL,                      -- 'extreme', 'mild' — never localized
+  name        jsonb NOT NULL,                     -- LocalizedText
+  description jsonb,                              -- LocalizedText, nullable
   price       numeric(10,2) NOT NULL CHECK (price >= 0),
   currency    char(3) NOT NULL DEFAULT 'ILS',
   is_active   boolean NOT NULL DEFAULT true,
   sort_order  integer NOT NULL DEFAULT 0,
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (location_id, name)
+  UNIQUE (location_id, code),
+  CHECK (jsonb_exists(name,'en') AND jsonb_exists(name,'he'))
 )
 ```
+
+Session-type vocabularies remain per-location (§3.2); `code` is unique only within its location, so Location A's `extreme` and Location B's `extreme` are unrelated rows that may carry different names and prices.
 
 **`operator_checkins`** — operator present at a location for a window.
 
@@ -376,6 +406,8 @@ setup_tokens (
 | Operator | Email + password, invite-only | Admin creates the user (`status='operator_pending_setup'`) → one-time link → `POST /auth/setup/:token` sets the password → `POST /auth/login` |
 | Admin | Email + password | Provisioned by CLI seed only, never a signup route; same `POST /auth/login` |
 
+**Both flows send text the client cannot localize**, so both are locale-aware (§2.4). `POST /auth/otp/request` accepts a `locale` and forwards it to Twilio Verify, which localizes the OTP message; the value is persisted to `users.preferred_locale` on verification. The operator invite email is rendered in the locale the admin sets when creating the account, defaulting to `DEFAULT_LOCALE`. Without this, a Hebrew-speaking operator receives an English invite.
+
 Phone numbers are normalized to E.164 (libphonenumber) before any storage or lookup. Skipping normalization does not merely create duplicate users — it defeats per-phone OTP rate limiting, because `0501234567` and `+972501234567` would count as different numbers.
 
 Passwords are hashed with **argon2id** at OWASP parameters: m=19 MiB, t=2, p=1.
@@ -451,7 +483,7 @@ On success, `operators.presence` becomes `online`.
 
 ### 5.2a Operator schedule
 
-`GET /operators/me/schedule?date=` returns the calling operator's own day: their active check-in windows, and every slot in them with its status — plus, for booked slots, the booking's id, status, `start_at`, session type name, and the customer's display name and phone. This is the operator app's home screen. It is scoped to `operator_id` from the access token, never a path parameter, so there is no object-level authorization surface to get wrong.
+`GET /operators/me/schedule?date=` returns the calling operator's own day: their active check-in windows, and every slot in them with its status — plus, for booked slots, the booking's id, status, `start_at`, the session type's `code` and `LocalizedText` name, and the customer's display name and phone. This is the operator app's home screen. It is scoped to `operator_id` from the access token, never a path parameter, so there is no object-level authorization surface to get wrong.
 
 ### 5.2b Mid-day break
 
@@ -479,7 +511,7 @@ Break-cancelled slots are indistinguishable from checkout-cancelled ones, so ava
 
 `GET /discovery/locations?lat=&lng=[&radius=]` returns active locations within `DISCOVERY_RADIUS_M` (default 300 m), joined to open-slot counts for today in the business timezone, and each location's minimum active price.
 
-Per location the response carries `id`, `site`, `name`, `description`, `distance_m`, `min_price`, `currency`, and the available slot times **each with its capacity** (how many operators are free at that tick).
+Per location the response carries `id`, `code`, `site_code`, `site_name`, `name`, `description`, `distance_m`, `min_price`, `currency`, and the available slot times **each with its capacity** (how many operators are free at that tick). `site_name`, `name`, and `description` are `LocalizedText` objects carrying every supported locale (§2.4), not pre-resolved strings.
 
 `GET /discovery/locations/:id` returns that location's active session types with prices, plus its slot times and capacities.
 
@@ -590,7 +622,9 @@ A single Nest exception filter produces one envelope for every failure:
 }
 ```
 
-Domain code throws typed domain errors; the filter alone maps them to HTTP status, so services never import HTTP concerns. The machine-readable `code` is the client contract — the React Native apps render Hebrew and English, so they switch on `code` and never parse `message`.
+Domain code throws typed domain errors; the filter alone maps them to HTTP status, so services never import HTTP concerns. The machine-readable `code` is the client contract — the React Native apps render Hebrew and English, so they switch on `code` and never parse `message`. `message` is English developer-facing text for logs and debugging, never surfaced to end users.
+
+Consequently **`details` carries structured parameters, never prose** — `{ "field": "price", "min": 0 }`, not `"price must be at least 0"` — so the client can interpolate them into its own localized sentence. A message assembled server-side cannot be translated after the fact.
 
 zod validation failures return 422 with field-level detail. 401 and 403 remain distinct. Unexpected errors return a generic 500 while the stack is logged under the same `requestId`.
 
@@ -609,6 +643,8 @@ A zod-validated environment schema that fails at boot rather than at first use. 
 | `REFRESH_TOKEN_TTL` | `30d` | Design §8 |
 | `TWILIO_ACCOUNT_SID` / `_AUTH_TOKEN` / `_VERIFY_SERVICE_SID` | — | OTP delivery |
 | `BUSINESS_TIMEZONE` | `Asia/Jerusalem` | The single source of "today" |
+| `SUPPORTED_LOCALES` | `en,he` | Validates `users.preferred_locale` and `LocalizedText` payloads |
+| `DEFAULT_LOCALE` | `he` | Fallback for server-originated text |
 | `SLOT_DURATION_MIN` | `15` | Grid tick size |
 | `DISCOVERY_RADIUS_M` | `300` | Design §3.2 |
 | `CHECKIN_LOCATION_TOLERANCE_M` | `150` | Physical-presence verification |
@@ -632,7 +668,7 @@ pino JSON logs. A request id is taken from the inbound header or generated, atta
 
 Development follows the superpowers TDD workflow: tests lead.
 
-**Tier 1 — unit, zero I/O (Vitest).** The booking state machine as an exhaustive table covering every populated and every empty cell; grid alignment; E.164 normalization; the daily-load and tie-break ordering logic; token hashing; the config schema.
+**Tier 1 — unit, zero I/O (Vitest).** The booking state machine as an exhaustive table covering every populated and every empty cell; grid alignment; E.164 normalization; the daily-load and tie-break ordering logic; token hashing; `LocalizedText` validation against `SUPPORTED_LOCALES`; the config schema.
 
 **Tier 2 — integration, real Postgres + PostGIS + Redis.** Docker Compose supplies the services; tests run against a dedicated test database with migrations applied at suite start and truncation between tests. Covers repositories and the `ST_DWithin` discovery query against seeded geography.
 
@@ -666,7 +702,8 @@ pnpm audit                # design §9
 
 These are recorded deliberately, not overlooked:
 
-- **Site as an entity.** `locations.site` is a text field. It promotes to a table when site-level branding, address, or reporting is needed.
+- **Site as an entity.** Site is a pair of fields on `locations` — `site_code` for grouping, `site_name` for localized display. It promotes to a table when site-level branding, address, or reporting is needed; localizing `site_name` denormalizes it across every location at a site, which strengthens that case somewhat.
+- **Additional locales.** `LocalizedText` is `jsonb`, so adding Arabic or Russian is a data migration plus a `SUPPORTED_LOCALES` change, not a schema change. The CHECK constraints naming `'en'` and `'he'` are the only DDL that would need revising.
 - **Operator payouts.** Design §7 defers gateway selection to sub-project #5; MVP handles payouts manually.
 - **Discovery caching.** Redis caching of the geo query, per design §3.2, once load justifies it.
 - **`pending` booking status.** Returns in #4 alongside identity photo, or in #5 if payment moves to booking time.
