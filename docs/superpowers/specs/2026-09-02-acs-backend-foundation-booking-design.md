@@ -53,7 +53,8 @@ A single NestJS process. Sub-project #3 adds a second entrypoint (`src/worker.ts
 | Logging | pino via `nestjs-pino` | Structured JSON with request-id correlation |
 | Tests | Vitest | Faster TDD inner loop than Jest |
 | API docs | `@nestjs/swagger` → OpenAPI | Gives the React Native clients a real contract |
-| OTP delivery | Twilio Verify behind an `OtpProvider` port | Managed code generation, SMS delivery, and abuse protection — design §9 flags SMS bombing as a real risk |
+| SMS delivery | SMS4Free behind an `SmsProvider` port, selected by config | Cheaper and more agile than a managed verification service. The port is a single `send(phone, message)` method, so swapping SMS4Free → InforU → anything is one factory change (§4.5) |
+| OTP protocol | Owned in-house (`OtpService`) | The consequence of a dumb SMS pipe: code generation, hashing, expiry, attempt counting, and abuse protection are ours, not a vendor's (§4.5) |
 
 ### 2.3 Code organization
 
@@ -70,7 +71,8 @@ src/
     db/                       drizzle client, schema, migration runner
     redis/
   modules/
-    auth/                     login, OTP, tokens, refresh rotation
+    auth/                     login, OTP protocol, tokens, refresh rotation
+    sms/                      SmsProvider port + SMS4Free and fake adapters
     users/                    identity, roles
     operators/                profile, admin invite / approve / suspend
     locations/                admin CRUD for locations + session types
@@ -402,11 +404,13 @@ setup_tokens (
 
 | Role | Identity | Endpoints |
 |---|---|---|
-| Customer | Phone + OTP | `POST /auth/otp/request` → Twilio Verify sends; `POST /auth/otp/verify` → verifies, upserts user, issues tokens |
+| Customer | Phone + OTP | `POST /auth/otp/request` → `OtpService` generates and sends via `SmsProvider`; `POST /auth/otp/verify` → verifies, upserts user, issues tokens (§4.5) |
 | Operator | Email + password, invite-only | Admin creates the user (`status='operator_pending_setup'`) → one-time link → `POST /auth/setup/:token` sets the password → `POST /auth/login` |
 | Admin | Email + password | Provisioned by CLI seed only, never a signup route; same `POST /auth/login` |
 
-**Both flows send text the client cannot localize**, so both are locale-aware (§2.4). `POST /auth/otp/request` accepts a `locale` and forwards it to Twilio Verify, which localizes the OTP message; the value is persisted to `users.preferred_locale` on verification. The operator invite email is rendered in the locale the admin sets when creating the account, defaulting to `DEFAULT_LOCALE`. Without this, a Hebrew-speaking operator receives an English invite.
+**Both flows send text the client cannot localize**, so both are locale-aware (§2.4). `POST /auth/otp/request` accepts a `locale`, which selects the SMS message template and is persisted to `users.preferred_locale` on verification. The operator invite email is rendered in the locale the admin sets when creating the account, defaulting to `DEFAULT_LOCALE`. Without this, a Hebrew-speaking operator receives an English invite.
+
+Message templates live in code, not the database — they are developer-owned strings, not admin-authored content. **The Hebrew template must stay within 70 characters.** Hebrew SMS is encoded as UCS-2, which fits 70 characters per segment rather than GSM-7's 160, so an over-long template silently bills two segments for every code sent. A unit test asserts the length.
 
 Phone numbers are normalized to E.164 (libphonenumber) before any storage or lookup. Skipping normalization does not merely create duplicate users — it defeats per-phone OTP rate limiting, because `0501234567` and `+972501234567` would count as different numbers.
 
@@ -455,9 +459,50 @@ Layered on top:
 
 ### 4.4 Abuse protection
 
-Redis-backed rate limits on: OTP request (per phone **and** per IP), OTP verify attempts (with lockout), and login attempts (per email **and** per IP, with lockout). Plus `helmet`.
+Redis-backed rate limits on: OTP request (per phone **and** per IP, plus a per-phone daily cap), OTP verify attempts (per code, with lockout), and login attempts (per email **and** per IP, with lockout). Plus `helmet`.
+
+**These limiters are now the only defense against SMS bombing.** An earlier draft delegated that to a managed verification service's built-in abuse protection; with a plain SMS gateway (§4.5) it is entirely ours. The per-phone daily cap is therefore cost control as much as abuse control — every send is billed, and an unbounded resend loop is a billing incident before it is a security one.
 
 **`trust proxy` must be configured correctly.** Behind a TLS-terminating host, an unconfigured proxy makes every request appear to originate from the load balancer, silently collapsing every per-IP limit into a single global limit.
+
+### 4.5 SMS delivery and the OTP protocol
+
+The SMS vendor is a dumb pipe, so two concerns that a managed verification service would have bundled are separated here.
+
+**`SmsProvider` — the swappable transport.**
+
+```ts
+interface SmsProvider {
+  send(phone: string, message: string): Promise<void>;   // throws SmsDeliveryError
+}
+```
+
+One method, no knowledge of OTP. `SMS_PROVIDER` (config) names the implementation, and a factory resolves it, so adding InforU or returning to a managed service is a new class plus a config value — nothing outside that factory changes. `Sms4FreeProvider` posts JSON to SMS4Free's HTTP endpoint and maps its numeric status to a thrown domain error; vendor status codes never escape the adapter. `FakeSmsProvider` captures messages in memory for tests.
+
+**Non-Israeli numbers are rejected at request time.** SMS4Free is an Israeli gateway, and delivery to foreign numbers is not assumed to work. Rather than report "code sent" for a message that never arrives — the worst failure mode, and near-undiagnosable from support tickets — `POST /auth/otp/request` returns **`PHONE_COUNTRY_UNSUPPORTED`** for any number outside `SMS_SUPPORTED_COUNTRIES` (default `IL`). Country-based provider routing is deferred (§11); the port already accommodates it.
+
+**`OtpService` — the protocol, owned in-house.**
+
+Request:
+1. Normalize to E.164 (§4.1). Every Redis key derives from the normalized value, or the cooldown, daily cap, and attempt counter are all trivially bypassable.
+2. Enforce the cooldown and daily cap.
+3. Generate a 6-digit code from a CSPRNG over the **full** `000000`–`999999` range, zero-padded. Restricting to `100000`–`999999` would discard 10% of the keyspace for no reason.
+4. Store **`HMAC-SHA256(code, OTP_SECRET)`** — not the code, and deliberately not a password hash. A 6-digit code's security comes from its 5-minute TTL and 5-attempt cap, not from hash cost; a memory-hard hash would add ~50 ms and ~19 MiB per verify, which is a denial-of-service amplifier an attacker triggers for free. The keyed HMAC still prevents offline brute force of a leaked Redis dump, because 10⁶ candidates are useless without the secret.
+5. Render the localized template and hand it to `SmsProvider`.
+
+Storage is a Redis **hash**, and the shape matters:
+
+```
+HSET   otp:{e164} hash <hex>     # once, at creation
+EXPIRE otp:{e164} OTP_TTL_SEC    # once, at creation — never re-armed
+HINCRBY otp:{e164} attempts 1    # per verify; does not touch the TTL
+```
+
+Two bugs are designed out by that structure. Re-arming the TTL on a failed attempt would let an attacker hold a code alive indefinitely by guessing wrong, converting a 5-attempt cap into an unlimited one. And reading `attempts`, adding one, and writing it back is a race — two concurrent verifies both read `4`, both write `5`, and the cap leaks extra tries. `HINCRBY` is atomic and leaves the expiry alone.
+
+Verify **increments before comparing**, so a timeout or crash mid-request cannot yield a free attempt. Over the cap: delete the key and reject. Comparison is constant-time. On success the key is deleted immediately — codes are single-use.
+
+`OTP_SECRET` is a distinct secret from `JWT_SECRET`. Sharing one would mean a leak in either subsystem compromised both.
 
 ---
 
@@ -641,7 +686,14 @@ A zod-validated environment schema that fails at boot rather than at first use. 
 | `JWT_SECRET` | — | Access token signing |
 | `ACCESS_TOKEN_TTL` | `15m` | Design §8 |
 | `REFRESH_TOKEN_TTL` | `30d` | Design §8 |
-| `TWILIO_ACCOUNT_SID` / `_AUTH_TOKEN` / `_VERIFY_SERVICE_SID` | — | OTP delivery |
+| `SMS_PROVIDER` | `sms4free` | Selects the `SmsProvider` implementation (§4.5) |
+| `SMS4FREE_API_KEY` / `_USER` / `_PASS` / `_SENDER` | — | SMS4Free credentials and registered sender name |
+| `SMS_SUPPORTED_COUNTRIES` | `IL` | ISO country codes the gateway will accept; others are rejected at request time |
+| `OTP_SECRET` | — | HMAC key for code hashing; distinct from `JWT_SECRET` |
+| `OTP_TTL_SEC` | `300` | Code lifetime |
+| `OTP_MAX_ATTEMPTS` | `5` | Wrong guesses before the code is burned |
+| `OTP_RESEND_COOLDOWN_SEC` | `30` | Minimum gap between sends to one number |
+| `OTP_DAILY_CAP_PER_PHONE` | `10` | Hard daily ceiling — cost control as much as abuse control |
 | `BUSINESS_TIMEZONE` | `Asia/Jerusalem` | The single source of "today" |
 | `SUPPORTED_LOCALES` | `en,he` | Validates `users.preferred_locale` and `LocalizedText` payloads |
 | `DEFAULT_LOCALE` | `he` | Fallback for server-originated text |
@@ -674,9 +726,11 @@ Development follows the superpowers TDD workflow: tests lead.
 
 The tier's central test justifies §3.3's entire design: **fire N concurrent booking attempts at a slot with capacity 2 and assert exactly 2 bookings succeed, N−2 return 409, and no operator is double-booked.** Fairness is asserted by seeding unequal daily loads and checking the assignment order. No mock can tell you whether `FOR UPDATE SKIP LOCKED` behaves.
 
-**Tier 3 — E2E via supertest.** Full auth flows with Twilio stubbed at the `OtpProvider` port, including refresh rotation and replay-detection. Plus an **authorization matrix**: for every protected endpoint, a wrong-role token and a wrong-owner token must both be rejected. It is table-driven, so adding an endpoint without adding a row is a visible gap. This matrix is the standing automated answer to design §9's IDOR warning.
+**Tier 3 — E2E via supertest.** Full auth flows with `FakeSmsProvider` substituted at the `SmsProvider` port — the test reads the code out of the captured message, so the real OTP protocol is exercised end to end rather than stubbed. Includes refresh rotation and replay-detection. Plus an **authorization matrix**: for every protected endpoint, a wrong-role token and a wrong-owner token must both be rejected. It is table-driven, so adding an endpoint without adding a row is a visible gap. This matrix is the standing automated answer to design §9's IDOR warning.
 
-`OtpProvider` is the only external boundary in scope, so it stays a one-method port with Twilio and fake implementations.
+`SmsProvider` is the only external boundary in scope, so it stays a one-method port with SMS4Free and fake implementations.
+
+**Owning the OTP protocol adds tests that a managed service made unnecessary**, and they belong to whichever tier can actually observe the behavior. Tier 1: code generation covers the full `000000`–`999999` range including leading zeros, HMAC determinism, constant-time comparison, and the Hebrew template's 70-character ceiling. Tier 2 (real Redis): the TTL is **not** re-armed by a failed attempt, `HINCRBY` holds the cap under concurrent verifies, a burned code cannot be reused, and the cooldown and daily cap key off the normalized E.164 form so `0501234567` and `+972501234567` share one counter.
 
 **No coverage percentage target.** Two hard gates instead: the state machine table is complete, and the authorization matrix covers every route.
 
@@ -704,6 +758,8 @@ These are recorded deliberately, not overlooked:
 
 - **Site as an entity.** Site is a pair of fields on `locations` — `site_code` for grouping, `site_name` for localized display. It promotes to a table when site-level branding, address, or reporting is needed; localizing `site_name` denormalizes it across every location at a site, which strengthens that case somewhat.
 - **Additional locales.** `LocalizedText` is `jsonb`, so adding Arabic or Russian is a data migration plus a `SUPPORTED_LOCALES` change, not a schema change. The CHECK constraints naming `'en'` and `'he'` are the only DDL that would need revising.
+- **SMS provider routing by country.** MVP rejects numbers outside `SMS_SUPPORTED_COUNTRIES` (§4.5). When tourist bookings justify it, an `SmsRouter` picks a provider from the E.164 country code — SMS4Free for `+972`, another vendor elsewhere. The one-method port already accommodates this; nothing but the factory changes.
+- **SMS delivery receipts.** `SmsProvider.send` resolves on gateway acceptance, not handset delivery. If undelivered codes become a support burden, add a delivery-status webhook per provider.
 - **Operator payouts.** Design §7 defers gateway selection to sub-project #5; MVP handles payouts manually.
 - **Discovery caching.** Redis caching of the geo query, per design §3.2, once load justifies it.
 - **`pending` booking status.** Returns in #4 alongside identity photo, or in #5 if payment moves to booking time.
