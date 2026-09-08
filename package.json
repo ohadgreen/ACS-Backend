@@ -1,0 +1,41 @@
+{
+  "name": "acs-backend",
+  "version": "0.1.0",
+  "description": "ACS Backend — drone-operator on-demand video booking API",
+  "private": true,
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@12.3.4",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js",
+    "start:dev": "node -r @swc-node/register src/main.ts",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.2.3",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "^11.2.3",
+    "@nestjs/platform-express": "^11.2.3",
+    "helmet": "^8.3.0",
+    "nestjs-zod": "^5.5.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.2.3",
+    "@swc-node/register": "^1.11.1",
+    "@swc/core": "^1.16.2",
+    "@types/node": "^26.4.1",
+    "@types/supertest": "^7.2.1",
+    "supertest": "^7.2.2",
+    "typescript": "^5.9.3",
+    "unplugin-swc": "^1.5.11",
+    "vitest": "^5.0.0"
+  }
+}
