@@ -8,6 +8,27 @@
       "when": 1788850599933,
       "tag": "0000_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788857110844,
+      "tag": "0001_locations",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788857577292,
+      "tag": "0002_slots",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788858950804,
+      "tag": "0003_bookings",
+      "breakpoints": true
     }
   ]
 }

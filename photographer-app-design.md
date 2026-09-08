@@ -1,11 +1,11 @@
-# Photographer On-Demand Booking App — Technical Design
+# operator On-Demand Booking App — Technical Design
 
 ## 1. System Overview
 
-Two client apps (Customer, Photographer) on React Native, backed by a Node.js API and Postgres. Core domains:
+Two client apps (Customer, operator) on React Native, backed by a Node.js API and Postgres. Core domains:
 
-1. **Presence & Availability** — photographers check in, publish 15-min slots
-2. **Discovery** — geo search for nearby available photographers
+1. **Presence & Availability** — operators check in, publish 15-min slots
+2. **Discovery** — geo search for nearby available operators
 3. **Booking** — reserve a slot, handle cancellations/expiry
 4. **Session Lifecycle** — pre-session readiness ack, in-progress, completed
 5. **Media Pipeline** — upload → watermark → deliver preview → full-res purchase
@@ -13,7 +13,7 @@ Two client apps (Customer, Photographer) on React Native, backed by a Node.js AP
 
 ```
 ┌─────────────────┐         ┌─────────────────┐
-│ Customer App RN  │         │ Photographer App RN│
+│ Customer App RN  │         │ operator App RN│
 └────────┬─────────┘         └─────────┬─────────┘
          │ REST/WebSocket               │
          └───────────┬──────────────────┘
@@ -40,21 +40,21 @@ Two client apps (Customer, Photographer) on React Native, backed by a Node.js AP
 ## 2. Data Model (core tables)
 
 ```sql
-photographers (
+operators (
   id, user_id, display_name, bio, rating, gear_tags[],
   price_per_session, stripe_account_id, status  -- offline/online/in_session
 )
 
-photographer_locations (   -- current check-in
-  photographer_id, geog GEOGRAPHY(POINT), checked_in_at, active_until
+operator_locations (   -- current check-in
+  operator_id, geog GEOGRAPHY(POINT), checked_in_at, active_until
 )
 
 availability_slots (
-  id, photographer_id, start_at, end_at, status  -- open/booked/expired/cancelled
+  id, operator_id, start_at, end_at, status  -- open/booked/expired/cancelled
 )
 
 bookings (
-  id, slot_id, customer_id, photographer_id, status,
+  id, slot_id, customer_id, operator_id, status,
   -- pending -> confirmed -> customer_ready -> in_progress -> completed -> cancelled/no_show
   created_at, ready_ack_at,
   identity_photo_key,       -- S3 key, private bucket, camera-only capture
@@ -73,20 +73,20 @@ purchases (
 ```
 
 Key indexing decisions:
-- `photographer_locations.geog` uses **PostGIS** with a GIST index — `ST_DWithin` for the 300m radius query. This is the single most important infra choice; don't try to hand-roll geo search.
-- `availability_slots` indexed on `(photographer_id, status, start_at)` for "today's open slots."
+- `operator_locations.geog` uses **PostGIS** with a GIST index — `ST_DWithin` for the 300m radius query. This is the single most important infra choice; don't try to hand-roll geo search.
+- `availability_slots` indexed on `(operator_id, status, start_at)` for "today's open slots."
 - Bookings use a state machine (enum + allowed transitions enforced in application code, not just DB constraint) — this flow has many edge cases (no-shows, late cancellations, slot expiry) that are easy to get wrong.
 
 ## 3. Key Flows
 
-### 3.1 Photographer check-in & slot publishing
-- Photographer app sends check-in with lat/lng → upsert into `photographer_locations`, set status `online`.
-- Photographer defines slots for the day (simple UI: pick start times, 15-min granularity, or a "auto-generate slots for next N hours" button for speed).
+### 3.1 operator check-in & slot publishing
+- operator app sends check-in with lat/lng → upsert into `operator_locations`, set status `online`.
+- operator defines slots for the day (simple UI: pick start times, 15-min granularity, or a "auto-generate slots for next N hours" button for speed).
 - A background job expires slots whose `start_at` has passed without a booking.
 
 ### 3.2 Discovery
 - Customer app sends current lat/lng.
-- API: `SELECT ... FROM photographer_locations WHERE ST_DWithin(geog, customer_point, 300) AND status='online'`, joined to `availability_slots WHERE status='open' AND start_at::date = today`.
+- API: `SELECT ... FROM operator_locations WHERE ST_DWithin(geog, customer_point, 300) AND status='online'`, joined to `availability_slots WHERE status='open' AND start_at::date = today`.
 - Cache this query in Redis with short TTL (5-10s) if load is high — for MVP, skip caching, Postgres will handle it fine at low volume.
 
 ### 3.3 Booking
@@ -94,22 +94,22 @@ Key indexing decisions:
 - Booking created in `pending`/`confirmed` state.
 
 ### 3.4 Identity photo (customer verification)
-- At booking time, before confirmation, customer app forces a **live camera capture** (no gallery picker) of the customer's face — purpose is in-person identification by the photographer, not a deliverable photo.
+- At booking time, before confirmation, customer app forces a **live camera capture** (no gallery picker) of the customer's face — purpose is in-person identification by the operator, not a deliverable photo.
 - Uploaded via pre-signed URL directly to a **separate, private S3 prefix/bucket** from session media — never enters the watermark/delivery pipeline.
-- Access scoped server-side to only the photographer assigned to that booking, via short-TTL signed URLs generated on request — not cached or permanently downloaded by the photographer app.
+- Access scoped server-side to only the operator assigned to that booking, via short-TTL signed URLs generated on request — not cached or permanently downloaded by the operator app.
 - **Purge job**: a scheduled worker (same pattern as slot-expiry) deletes the photo from storage and nulls `identity_photo_key`, setting `identity_photo_purged_at`, a fixed short window after the booking reaches `completed` (e.g. 24–48h). No facial-recognition/ML matching — manual human glance only, by design, to keep this feature low-risk.
-- One-time consent modal on first use explaining purpose, visibility (photographer only), and auto-deletion — shown before first capture, not just buried in ToS.
-- Log photographer access to identity photos (who viewed, when) for audit/abuse investigation purposes.
+- One-time consent modal on first use explaining purpose, visibility (operator only), and auto-deletion — shown before first capture, not just buried in ToS.
+- Log operator access to identity photos (who viewed, when) for audit/abuse investigation purposes.
 
 ### 3.5 Pre-session readiness
 - BullMQ delayed job scheduled at `slot.start_at - 5min` → sends push notification "Your session starts soon, confirm you're ready."
-- Customer taps confirm → `bookings.status='customer_ready'`, `ready_ack_at` set → push/socket event to photographer app so they see it live.
-- If no ack within a grace window (e.g. 2 min before start), auto-cancel or flag as at-risk and notify photographer — decide this policy early, it's a common support-ticket source.
+- Customer taps confirm → `bookings.status='customer_ready'`, `ready_ack_at` set → push/socket event to operator app so they see it live.
+- If no ack within a grace window (e.g. 2 min before start), auto-cancel or flag as at-risk and notify operator — decide this policy early, it's a common support-ticket source.
 
 ### 3.6 Media delivery (video)
-- Photographer uploads the full-res, ~1-minute drone video directly to **S3/R2 via a pre-signed URL** (never proxy large video files through your Node server).
+- operator uploads the full-res, ~1-minute drone video directly to **S3/R2 via a pre-signed URL** (never proxy large video files through your Node server).
 - Upload event → BullMQ job on your worker runs an **ffmpeg pipeline**:
-  1. **Trim** — cut a short promo clip (a few seconds) from the full video. For MVP, let the photographer pick the start point via a simple scrubber UI (drag to a timestamp, fixed clip length e.g. 5-8s) rather than trying to auto-detect the "best" moment — much less engineering for a perfectly adequate result, and gives the photographer useful control.
+  1. **Trim** — cut a short promo clip (a few seconds) from the full video. For MVP, let the operator pick the start point via a simple scrubber UI (drag to a timestamp, fixed clip length e.g. 5-8s) rather than trying to auto-detect the "best" moment — much less engineering for a perfectly adequate result, and gives the operator useful control.
   2. **Watermark** — overlay a watermark on the trimmed clip (ffmpeg's `overlay` filter), output a compressed, lower-res preview file.
   3. Write a `media_assets` row (`type='preview_watermarked'`) pointing at the short clip → notify customer in-app that their preview is ready.
 - Full-res original stays private in S3/R2, untouched by watermarking, only accessible after purchase (served via short-lived signed URL for download/streaming). **Stored uncompressed for now** — no re-encoding on the full-res path, since ~1 minute of HD footage is small enough not to justify the added processing/complexity yet. Revisit if source file sizes grow (e.g. 4K) or storage/egress costs become material.
@@ -118,8 +118,8 @@ Key indexing decisions:
 **Future enhancement (not MVP)**: an auto-editing pass on the full-res video — trimming stale/low-motion moments, appending a branded outro/logo — could slot in as an additional ffmpeg job stage between upload and "ready for sale," without changing the overall pipeline shape (still upload → process → store). Likely candidates when you get there: basic motion/scene-change detection (ffmpeg's scene filter or a simple frame-diff heuristic) for trimming, and a static logo overlay/concat for the outro — both doable without a heavier video-ML dependency. Worth deferring until you have real footage samples to tune against; premature to build against assumptions now.
 
 ### 3.7 Payment
-- Use **Stripe Connect** (photographers are your marketplace "connected accounts") — this handles the split-payment/payout problem for you instead of you building ledger logic.
-- Customer selects photos to buy → create PaymentIntent → on success webhook, mark `purchases` row paid, grant access to full-res `media_assets`, trigger payout logic to photographer's connected account.
+- Use **Stripe Connect** (operators are your marketplace "connected accounts") — this handles the split-payment/payout problem for you instead of you building ledger logic.
+- Customer selects photos to buy → create PaymentIntent → on success webhook, mark `purchases` row paid, grant access to full-res `media_assets`, trigger payout logic to operator's connected account.
 
 ### 3.8 Operator video retrieval & session association
 Drone operator uses a **dedicated Android tablet** (locks environment, avoids per-device permission/storage variability, sidesteps DJI's lack of iOS MSDK support entirely since this flow doesn't use the DJI SDK at all).
@@ -143,7 +143,7 @@ Drone operator uses a **dedicated Android tablet** (locks environment, avoids pe
 | Mobile | React Native + Expo (managed workflow) | Push notifications, camera, location, OTA updates all handled; ejecting later is possible if needed |
 | Backend | Node.js + NestJS (or plain Express if you want less ceremony) | Structure pays off once you have 5+ domains; Express is fine if you want to move faster and are disciplined |
 | DB | Postgres + PostGIS extension | Geo queries are core to the product — don't reach for a separate geo DB |
-| Cache/pubsub | Redis | Session state, live "photographer went offline" events via pub/sub to sockets |
+| Cache/pubsub | Redis | Session state, live "operator went offline" events via pub/sub to sockets |
 | Realtime | Socket.io or simple polling for MVP | Live status (ready ack, in-progress) — polling every 5-10s is a legitimate MVP shortcut |
 | Storage | S3 (or Cloudflare R2 for cheaper egress) | Pre-signed URLs for direct upload/download |
 | Video processing | ffmpeg (via `fluent-ffmpeg` or CLI calls) in a worker | Trim + watermark pipeline; runs as a BullMQ job, not inline in the request |
@@ -163,12 +163,12 @@ Drone operator uses a **dedicated Android tablet** (locks environment, avoids pe
 - Skip auto-slot-expiry edge cases initially; handle manually/via a simple cron.
 - Watermarking: a fixed-position text/logo overlay via Sharp, run synchronously on upload for v0 — optimize to async workers later.
 - Payments: Stripe Checkout (hosted page) instead of building custom payment UI — much faster to ship, upgrade to Payment Sheet/Elements later.
-- No photographer vetting/rating system initially — manually onboard your first photographers.
+- No operator vetting/rating system initially — manually onboard your first operators.
 - One time zone, no multi-day slot planning UI complexity — "today only" slots.
 
 **Suggested build order (roughly 1 sprint each if solo/small team):**
 1. **Data model + auth** — Postgres schema, PostGIS extension, Firebase/Clerk auth wired into both apps.
-2. **Photographer check-in + slot CRUD** — simplest possible screens; this validates your core tables.
+2. **operator check-in + slot CRUD** — simplest possible screens; this validates your core tables.
 3. **Discovery + booking** — the geo query, slot locking transaction, booking states. This is the technical heart of the app — get it right before adding polish.
 4. **Notifications + readiness ack** — Expo push, BullMQ delayed job.
 5. **Upload + watermark pipeline** — S3 pre-signed URLs, Sharp watermarking, delivery to customer app.
@@ -180,13 +180,13 @@ Drone operator uses a **dedicated Android tablet** (locks environment, avoids pe
 - Deploy the Node API on Railway/Render/Fly.io instead of provisioning your own infra — trivial to migrate to AWS/ECS later once you have real load.
 - Use Expo's EAS Build/Submit to avoid wrestling with native build pipelines early on.
 
-**What NOT to build custom in v1:** auth, payments UI, geo indexing, native push plumbing, video processing. All have mature managed solutions — every hour spent reinventing these is an hour not spent validating whether photographers and customers actually want this.
+**What NOT to build custom in v1:** auth, payments UI, geo indexing, native push plumbing, video processing. All have mature managed solutions — every hour spent reinventing these is an hour not spent validating whether operators and customers actually want this.
 
 ## 6. Risks/Edge Cases Worth Deciding Early
 
 - **Double-booking race**: solved by the conditional `UPDATE ... WHERE status='open'` pattern above — don't rely on app-level locking alone.
-- **No-show policy**: define whether photographer or customer eats the cost, and whether it affects future booking privileges.
-- **Slot timing drift**: what happens if the photographer is late checking a customer in — does the 15-min slot shrink or shift?
+- **No-show policy**: define whether operator or customer eats the cost, and whether it affects future booking privileges.
+- **Slot timing drift**: what happens if the operator is late checking a customer in — does the 15-min slot shrink or shift?
 - **Preview vs. full-res ownership**: make clear in ToS that watermarked previews are provided regardless of purchase, but full-res requires payment — avoids disputes.
 - **Cancellation windows**: how close to session start can either party cancel without penalty.
 - **Identity photo retention**: don't skip the purge job — treat it as core to the feature, not a follow-up task, given it's biometric-adjacent data.
@@ -194,24 +194,24 @@ Drone operator uses a **dedicated Android tablet** (locks environment, avoids pe
 
 ## 7. Payments — Israel-Specific Note
 
-Stripe (and Stripe Connect, needed for photographer payouts) does **not support Israeli-registered businesses or connected accounts** — confirmed against Stripe's current supported-country list. Practical options:
+Stripe (and Stripe Connect, needed for operator payouts) does **not support Israeli-registered businesses or connected accounts** — confirmed against Stripe's current supported-country list. Practical options:
 - **Rapyd** — Israeli-founded, supports Israeli merchants and has marketplace disbursement tooling; the most direct fit for this app's needs.
-- Israeli gateways (**Tranzila**, **Max by Hyp**, **PayMe**) — support cards plus local methods like **Bit** and **Paybox**, which Israeli customers commonly expect, but have weaker/no marketplace-payout tooling — likely means building photographer payout logic yourself or handling payouts manually early on.
-- Incorporating outside Israel (e.g. via Stripe Atlas) unlocks Stripe for the platform entity, but doesn't solve photographer-side payouts unless photographers also have foreign entities/accounts — not realistic for individual local photographers.
+- Israeli gateways (**Tranzila**, **Max by Hyp**, **PayMe**) — support cards plus local methods like **Bit** and **Paybox**, which Israeli customers commonly expect, but have weaker/no marketplace-payout tooling — likely means building operator payout logic yourself or handling payouts manually early on.
+- Incorporating outside Israel (e.g. via Stripe Atlas) unlocks Stripe for the platform entity, but doesn't solve operator-side payouts unless operators also have foreign entities/accounts — not realistic for individual local operators.
 
-**MVP recommendation**: pick one Israeli gateway supporting cards + Bit for the customer-facing checkout; handle photographer payouts manually (bank transfer, simple admin tool) until volume justifies automating via Rapyd or similar.
+**MVP recommendation**: pick one Israeli gateway supporting cards + Bit for the customer-facing checkout; handle operator payouts manually (bank transfer, simple admin tool) until volume justifies automating via Rapyd or similar.
 
 ## 8. Authentication & Authorization
 
 **Per-role auth method:**
 - **Customer** — phone + OTP (no password), as decided earlier. Optional anonymous browsing, phone verification required at booking/payment.
-- **Photographer/operator** — **username + password**. Since these are vetted, approved accounts (not open self-serve like customers), provision them via an **admin-issued invite** (admin creates the account or approves a request, system sends a one-time setup link to set the password) rather than open self-registration with a password field — reduces spam/fake signups against a role that needs manual review anyway.
+- **operator/operator** — **username + password**. Since these are vetted, approved accounts (not open self-serve like customers), provision them via an **admin-issued invite** (admin creates the account or approves a request, system sends a one-time setup link to set the password) rather than open self-registration with a password field — reduces spam/fake signups against a role that needs manual review anyway.
 - **Admin** — username + password, provisioned out-of-band only (never via app signup), as decided earlier.
 
 Passwords: hash with **argon2** (or bcrypt if you want the more battle-tested/simpler default) — never store plaintext, never roll your own hashing.
 
 **Token strategy — short-lived access + revocable refresh:**
-- **Access token (JWT)**: short expiry (e.g. **15 minutes**). Every protected endpoint validates signature + expiry + embedded role. Short expiry means a suspended/rejected photographer's access dies quickly on its own, without needing instant revocation infrastructure.
+- **Access token (JWT)**: short expiry (e.g. **15 minutes**). Every protected endpoint validates signature + expiry + embedded role. Short expiry means a suspended/rejected operator's access dies quickly on its own, without needing instant revocation infrastructure.
 - **Refresh token**: longer-lived (e.g. 30 days), but **not** a bare JWT — store it (hashed) server-side so it's revocable:
   ```sql
   refresh_tokens (
@@ -219,8 +219,8 @@ Passwords: hash with **argon2** (or bcrypt if you want the more battle-tested/si
     created_at, expires_at, revoked_at
   )
   ```
-  Suspending a photographer/operator = revoke their refresh tokens immediately (`revoked_at = now()`); their current access token still works until it naturally expires (≤15 min), then refresh fails and they're locked out — a good balance of "fast enough" revocation without needing a live token-blocklist for MVP.
-- On refresh, re-check current status (`photographers.status = 'approved'`) before issuing a new access token — this is what actually enforces "approved users only" on an ongoing basis, not just at login.
+  Suspending a operator/operator = revoke their refresh tokens immediately (`revoked_at = now()`); their current access token still works until it naturally expires (≤15 min), then refresh fails and they're locked out — a good balance of "fast enough" revocation without needing a live token-blocklist for MVP.
+- On refresh, re-check current status (`operators.status = 'approved'`) before issuing a new access token — this is what actually enforces "approved users only" on an ongoing basis, not just at login.
 
 **Device-side storage**: use **`expo-secure-store`** (Keychain on iOS, Keystore on Android) for tokens — never `AsyncStorage`, which is unencrypted.
 
@@ -241,7 +241,7 @@ Passwords: hash with **argon2** (or bcrypt if you want the more battle-tested/si
 
 **OTP abuse (SMS bombing)** — rate-limit "send OTP" per phone number *and* per IP, and use the provider's built-in abuse protection (Twilio Verify/Firebase Auth both have it) — otherwise it's an easy vector for harassing a number you don't own or running up your SMS bill.
 
-**Location spoofing** — a customer or photographer could mock-GPS their position, affecting discovery/check-in integrity. Not worth heavy engineering for MVP; note mock-location detection APIs exist on both platforms if this becomes a real abuse pattern later.
+**Location spoofing** — a customer or operator could mock-GPS their position, affecting discovery/check-in integrity. Not worth heavy engineering for MVP; note mock-location detection APIs exist on both platforms if this becomes a real abuse pattern later.
 
 **Refresh token rotation** — issue a new refresh token on each use and invalidate the old one; don't allow indefinite reuse of the same refresh token. A revoked/already-used token being presented again is a strong theft signal — force-invalidate that user's session when it happens.
 

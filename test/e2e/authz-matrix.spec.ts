@@ -36,6 +36,32 @@ export const PROTECTED_ROUTES: Array<{
   { method: 'get', path: '/admin/operators', allow: ['admin'] },
   { method: 'post', path: `/admin/operators/${uuidv7()}/approve`, allow: ['admin'] },
   { method: 'post', path: `/admin/operators/${uuidv7()}/suspend`, allow: ['admin'] },
+
+  { method: 'post', path: '/admin/locations', allow: ['admin'], body: {} },
+  { method: 'patch', path: `/admin/locations/${uuidv7()}`, allow: ['admin'], body: {} },
+  { method: 'post', path: `/admin/locations/${uuidv7()}/session-types`, allow: ['admin'], body: {} },
+  { method: 'patch', path: `/admin/session-types/${uuidv7()}`, allow: ['admin'], body: {} },
+
+  { method: 'post', path: '/operators/me/checkins', allow: ['operator'], body: {} },
+  { method: 'post', path: `/operators/me/checkins/${uuidv7()}/end`, allow: ['operator'] },
+  { method: 'post', path: '/operators/me/breaks', allow: ['operator'], body: {} },
+  { method: 'get', path: '/operators/me/schedule', allow: ['operator'] },
+
+  { method: 'post', path: '/bookings', allow: ['customer'], body: {} },
+  { method: 'post', path: `/bookings/${uuidv7()}/ack`, allow: ['customer'] },
+  { method: 'post', path: `/bookings/${uuidv7()}/start`, allow: ['operator'] },
+  { method: 'post', path: `/bookings/${uuidv7()}/end`, allow: ['operator'] },
+  {
+    method: 'post',
+    path: `/bookings/${uuidv7()}/cancel`,
+    allow: ['customer', 'operator', 'admin'],
+    body: {},
+  },
+  { method: 'post', path: `/bookings/${uuidv7()}/no-show`, allow: ['operator'] },
+  { method: 'get', path: '/bookings', allow: ['customer', 'operator'] },
+  { method: 'get', path: `/bookings/${uuidv7()}`, allow: ['customer', 'operator', 'admin'] },
+
+  { method: 'post', path: '/admin/maintenance/sweep-expired', allow: ['admin'] },
 ];
 
 const ALL_ROLES: Role[] = ['customer', 'operator', 'admin'];
@@ -84,6 +110,6 @@ describe('authorization matrix', () => {
   it('covers every route that is not explicitly @Public', () => {
     // A reminder rather than a reflection trick: when this count changes,
     // a row was added or a route was left out.
-    expect(PROTECTED_ROUTES).toHaveLength(7);
+    expect(PROTECTED_ROUTES).toHaveLength(24);
   });
 });
