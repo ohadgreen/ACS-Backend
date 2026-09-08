@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { DRIZZLE, type Db } from '../../infra/db/drizzle.module';
 import {
@@ -103,6 +103,22 @@ export class BookingsRepository {
   async findById(id: string): Promise<Booking | undefined> {
     const [row] = await this.db.select().from(bookings).where(eq(bookings.id, id));
     return row;
+  }
+
+  listForCustomer(customerId: string): Promise<Booking[]> {
+    return this.db
+      .select()
+      .from(bookings)
+      .where(eq(bookings.customerId, customerId))
+      .orderBy(desc(bookings.startAt));
+  }
+
+  listForOperator(operatorId: string): Promise<Booking[]> {
+    return this.db
+      .select()
+      .from(bookings)
+      .where(eq(bookings.operatorId, operatorId))
+      .orderBy(desc(bookings.startAt));
   }
 
   /**

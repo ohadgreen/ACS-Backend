@@ -1,8 +1,19 @@
-import { Body, Controller, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { Roles } from '../../common/auth/roles.decorator';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
+import { requireOperatorId } from '../operators/operators.controller';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { BookingsService } from './bookings.service';
+import { BookingAccessGuard } from './booking-access.guard';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { CancelBookingDto } from './dto/cancel-booking.dto';
 
@@ -14,6 +25,24 @@ export class BookingsController {
   @Post()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateBookingDto) {
     return this.bookings.create(user.userId, dto);
+  }
+
+  // Scoped to the caller's own party, so there is no id to get wrong. An
+  // admin is deliberately excluded: an unfiltered dump of every booking is a
+  // different endpoint with different pagination needs.
+  @Roles('customer', 'operator')
+  @Get()
+  list(@CurrentUser() user: AuthenticatedUser) {
+    return user.role === 'operator'
+      ? this.bookings.listForOperator(requireOperatorId(user))
+      : this.bookings.listForCustomer(user.userId);
+  }
+
+  @Roles('customer', 'operator', 'admin')
+  @UseGuards(BookingAccessGuard)
+  @Get(':id')
+  get(@Param('id', ParseUUIDPipe) id: string) {
+    return this.bookings.getById(id);
   }
 
   // Every lifecycle route is 200: they transition an existing booking rather

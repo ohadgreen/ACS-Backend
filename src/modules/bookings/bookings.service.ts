@@ -105,6 +105,22 @@ export class BookingsService {
     }
   }
 
+  listForCustomer(customerId: string) {
+    return this.repo.listForCustomer(customerId);
+  }
+
+  listForOperator(operatorId: string) {
+    return this.repo.listForOperator(operatorId);
+  }
+
+  async getById(id: string) {
+    const booking = await this.repo.findById(id);
+    if (!booking) {
+      throw new NotFoundError(ErrorCodes.BOOKING_NOT_FOUND, 'No such booking.');
+    }
+    return booking;
+  }
+
   /**
    * Ownership first, then the pure machine, then persistence. The machine is
    * given the time rather than reading a clock, so this method is the only

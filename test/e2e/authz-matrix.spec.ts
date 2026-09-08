@@ -58,6 +58,10 @@ export const PROTECTED_ROUTES: Array<{
     body: {},
   },
   { method: 'post', path: `/bookings/${uuidv7()}/no-show`, allow: ['operator'] },
+  { method: 'get', path: '/bookings', allow: ['customer', 'operator'] },
+  { method: 'get', path: `/bookings/${uuidv7()}`, allow: ['customer', 'operator', 'admin'] },
+
+  { method: 'post', path: '/admin/maintenance/sweep-expired', allow: ['admin'] },
 ];
 
 const ALL_ROLES: Role[] = ['customer', 'operator', 'admin'];
@@ -106,6 +110,6 @@ describe('authorization matrix', () => {
   it('covers every route that is not explicitly @Public', () => {
     // A reminder rather than a reflection trick: when this count changes,
     // a row was added or a route was left out.
-    expect(PROTECTED_ROUTES).toHaveLength(21);
+    expect(PROTECTED_ROUTES).toHaveLength(24);
   });
 });
