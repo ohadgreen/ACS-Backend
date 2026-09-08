@@ -133,12 +133,22 @@ export class AuthService {
       throw new UnauthorizedError(ErrorCodes.REFRESH_TOKEN_INVALID, 'Unknown refresh token.');
     }
 
-    if (row.revokedAt !== null || row.replacedBy !== null) {
+    // Replay and revocation are different events and must not share a code.
+    // A token that was already ROTATED is a theft signal — someone is using a
+    // token the legitimate client has since exchanged — so the whole family
+    // dies. A token merely REVOKED (logout, logout-all, admin suspension) is
+    // an expected outcome of a deliberate act; reporting it as theft would
+    // bury the real signal in noise and re-run a cascade that already ran.
+    if (row.replacedBy !== null) {
       await this.sessions.revokeFamily(row.familyId);
       throw new UnauthorizedError(
         ErrorCodes.REFRESH_TOKEN_REPLAYED,
         'Refresh token was already used; the session family has been revoked.',
       );
+    }
+
+    if (row.revokedAt !== null) {
+      throw new UnauthorizedError(ErrorCodes.REFRESH_TOKEN_INVALID, 'Refresh token was revoked.');
     }
 
     if (row.expiresAt.getTime() <= Date.now()) {
@@ -231,4 +241,22 @@ export class AuthService {
     const user = await this.usersRepo.upsertCustomerByPhone(phone, locale);
     return this.issuePair(user, null, deviceInfo);
   }
+
+  /** Consumes a one-time invite token (see UsersRepository.applySetup). */
+  async completeSetup(tokenPlain: string, password: string): Promise<void> {
+    const row = await this.usersRepo.findSetupTokenByPlain(tokenPlain);
+
+    if (!row || row.usedAt !== null || row.expiresAt.getTime() <= Date.now()) {
+      // One code for absent, spent and expired: none of them should tell an
+      // attacker which invite links ever existed.
+      throw new UnauthorizedError(
+        ErrorCodes.SETUP_TOKEN_INVALID,
+        'This setup link is invalid or has already been used.',
+      );
+    }
+
+    const passwordHash = await this.passwords.hash(password);
+    await this.usersRepo.applySetup(row.userId, row.id, passwordHash);
+  }
 }
+

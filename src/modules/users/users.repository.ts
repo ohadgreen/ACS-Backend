@@ -2,7 +2,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { DRIZZLE, type Db } from '../../infra/db/drizzle.module';
-import { operators, users, type Operator, type User } from '../../infra/db/schema';
+import { operators, setupTokens, users, type Operator, type SetupToken, type User } from '../../infra/db/schema';
+import { hashToken } from '../../common/crypto/opaque-token';
 
 /** Emails are stored lowercased and trimmed; every lookup normalizes first. */
 export function normalizeEmail(email: string): string {
@@ -68,5 +69,30 @@ export class UsersRepository {
       .returning();
     return created!;
   }
+
+  async findSetupTokenByPlain(token: string): Promise<SetupToken | undefined> {
+    const [row] = await this.db
+      .select()
+      .from(setupTokens)
+      .where(eq(setupTokens.tokenHash, hashToken(token)))
+      .limit(1);
+    return row;
+  }
+
+  /**
+   * Sets the password, activates the account and stamps the token used, all in
+   * one transaction — a crash between those steps would otherwise leave a spent
+   * token with no password set, locking the operator out permanently.
+   */
+  async applySetup(userId: string, tokenId: string, passwordHash: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(users)
+        .set({ passwordHash, status: 'active', updatedAt: new Date() })
+        .where(eq(users.id, userId));
+      await tx.update(setupTokens).set({ usedAt: new Date() }).where(eq(setupTokens.id, tokenId));
+    });
+  }
 }
+
 

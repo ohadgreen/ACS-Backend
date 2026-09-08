@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Post, Req } from '@nestjs/common';
+import { Body, Controller, HttpCode, Param, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { Public } from '../../common/auth/public.decorator';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { OtpRequestDto, OtpVerifyDto } from './dto/otp.dto';
+import { SetupDto } from './dto/setup.dto';
 import type { AuthenticatedUser } from './auth.types';
 
 @Controller('auth')
@@ -60,5 +61,13 @@ export class AuthController {
   verifyOtp(@Body() dto: OtpVerifyDto, @Req() req: Request) {
     return this.auth.verifyOtp(dto.phone, dto.code, req.get('user-agent') ?? null);
   }
+
+  @Public()
+  @Post('setup/:token')
+  @HttpCode(204)
+  async setup(@Param('token') token: string, @Body() dto: SetupDto) {
+    await this.auth.completeSetup(token, dto.password);
+  }
 }
+
 

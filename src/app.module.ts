@@ -6,6 +6,7 @@ import { AppConfigModule } from './infra/config/config.module';
 import { DrizzleModule } from './infra/db/drizzle.module';
 import { RedisModule } from './infra/redis/redis.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { OperatorsModule } from './modules/operators/operators.module';
 import { SmsModule } from './modules/sms/sms.module';
 import { HealthModule } from './modules/health/health.module';
 import { UsersModule } from './modules/users/users.module';
@@ -21,6 +22,7 @@ import { UsersModule } from './modules/users/users.module';
     UsersModule,
     SmsModule,
     AuthModule,
+    OperatorsModule,
     HealthModule,
   ],
 })

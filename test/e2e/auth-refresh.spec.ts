@@ -110,6 +110,21 @@ describe('POST /auth/refresh', () => {
     expect(res.body.error.code).toBe('OPERATOR_NOT_APPROVED');
   });
 
+  it('reports a revoked token as invalid, not as a replay', async () => {
+    const session = await loginFreshOperator('revoked-code@example.com');
+    await request(app.server)
+      .post('/auth/logout')
+      .send({ refreshToken: session.refreshToken })
+      .expect(204);
+
+    const res = await request(app.server)
+      .post('/auth/refresh')
+      .send({ refreshToken: session.refreshToken })
+      .expect(401);
+    // Conflating the two would bury genuine theft signals in logout noise.
+    expect(res.body.error.code).toBe('REFRESH_TOKEN_INVALID');
+  });
+
   it('logout revokes only the presented token', async () => {
     const session = await loginFreshOperator('logout@example.com');
     await request(app.server)
