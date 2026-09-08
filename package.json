@@ -41,6 +41,7 @@
     "@nestjs/testing": "^11.2.3",
     "@swc-node/register": "^1.11.1",
     "@swc/core": "^1.16.2",
+    "@types/express": "^5.0.6",
     "@types/ms": "^2.1.0",
     "@types/node": "^26.4.1",
     "@types/pg": "^8.23.1",

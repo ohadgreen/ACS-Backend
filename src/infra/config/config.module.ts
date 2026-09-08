@@ -8,6 +8,10 @@ import { envSchema } from './env.schema';
     ConfigModule.forRoot({
       isGlobal: true,
       cache: true,
+      // Under test, ignore .env entirely. Otherwise a developer's local file
+      // silently overrides the values the test harness sets, and suites end up
+      // running against the development database.
+      ignoreEnvFile: process.env.NODE_ENV === 'test',
       // Throws at boot on a missing or invalid variable, rather than at first
       // use somewhere deep in a request.
       validate: (raw) => envSchema.parse(raw),

@@ -7,6 +7,9 @@ export default defineConfig({
   resolve: { tsconfigPaths: true },
   test: {
     globals: false,
+    // Explicit rather than relying on Vitest's implicit default: the config
+    // module keys off this to ignore a developer's local .env file.
+    env: { NODE_ENV: 'test' },
     include: ['src/**/*.spec.ts'],
     environment: 'node',
   },
