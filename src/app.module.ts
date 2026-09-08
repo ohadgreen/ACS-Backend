@@ -6,6 +6,7 @@ import { AppConfigModule } from './infra/config/config.module';
 import { DrizzleModule } from './infra/db/drizzle.module';
 import { RedisModule } from './infra/redis/redis.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { DiscoveryModule } from './modules/discovery/discovery.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { OperatorsModule } from './modules/operators/operators.module';
 import { PresenceModule } from './modules/presence/presence.module';
@@ -27,6 +28,7 @@ import { UsersModule } from './modules/users/users.module';
     OperatorsModule,
     LocationsModule,
     PresenceModule,
+    DiscoveryModule,
     HealthModule,
   ],
 })
