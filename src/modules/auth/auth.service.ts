@@ -9,7 +9,7 @@ import { RateLimiterService } from '../../common/rate-limit/rate-limiter.service
 import { OtpService } from './otp/otp.service';
 import { normalizePhone, phoneCountry } from './phone';
 import { requireEnv, type AppConfig } from '../../infra/config/typed-config';
-import { UsersRepository } from '../users/users.repository';
+import { UsersRepository, normalizeEmail } from '../users/users.repository';
 import { SessionRepository } from './session.repository';
 import { TokenService } from './token.service';
 import type { Role } from './auth.types';
@@ -50,7 +50,18 @@ export class AuthService {
     this.dummyHash = this.passwords.hash(randomBytes(32).toString('hex'));
   }
 
-  async login(email: string, password: string, deviceInfo: string | null): Promise<TokenPair> {
+  async login(
+    email: string,
+    password: string,
+    deviceInfo: string | null,
+    ip: string,
+  ): Promise<TokenPair> {
+    // Per-email and per-IP both matter: the first blocks guessing one account,
+    // the second blocks spraying one password across many.
+    const emailKey = normalizeEmail(email);
+    await this.limiter.consume('login:email:' + emailKey, 5, 900);
+    await this.limiter.consume('login:ip:' + ip, 30, 900);
+
     const user = await this.usersRepo.findByEmail(email);
     const hash = user?.passwordHash ?? (await this.dummyHash);
     const ok = await this.passwords.verify(hash, password);
@@ -68,6 +79,10 @@ export class AuthService {
         status: user.status,
       });
     }
+
+    // Clear the per-email counter on success, so a legitimate user is not
+    // locked out by their own earlier typos.
+    await this.limiter.reset('login:email:' + emailKey);
 
     return this.issuePair(user, null, deviceInfo);
   }
