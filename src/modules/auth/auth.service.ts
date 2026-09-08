@@ -12,7 +12,6 @@ import { requireEnv, type AppConfig } from '../../infra/config/typed-config';
 import { UsersRepository, normalizeEmail } from '../users/users.repository';
 import { SessionRepository } from './session.repository';
 import { TokenService } from './token.service';
-import type { Role } from './auth.types';
 import type { User } from '../../infra/db/schema';
 
 export interface TokenPair {
@@ -101,7 +100,7 @@ export class AuthService {
     familyId: string | null,
     deviceInfo: string | null,
   ): Promise<TokenPair> {
-    const role = user.role as Role;
+    const role = user.role;
     const operatorId =
       role === 'operator' ? (await this.usersRepo.findOperatorByUserId(user.id))?.id : undefined;
 
@@ -183,7 +182,7 @@ export class AuthService {
     return {
       accessToken: this.tokens.issueAccessToken({
         sub: user.id,
-        role: user.role as Role,
+        role: user.role,
         operatorId,
         jti: uuidv7(),
       }),

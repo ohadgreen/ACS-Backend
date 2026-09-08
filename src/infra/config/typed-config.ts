@@ -18,7 +18,7 @@ export type AppConfig = ConfigService<Env, true>;
  * env.schema.ts.
  */
 export function requireEnv<K extends keyof Env>(config: AppConfig, key: K): Env[K] {
-  const value = config.get(key, { infer: true }) as Env[K] | undefined;
+  const value = config.get(key, { infer: true });
   if (value === undefined) {
     throw new Error(`Missing validated configuration key: ${String(key)}`);
   }

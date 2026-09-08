@@ -12,7 +12,6 @@ import { SessionRepository, refreshTtlProvider } from './session.repository';
 import { JwtAuthGuard } from '../../common/auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/auth/roles.guard';
 import type { Env } from '../../infra/config/env.schema';
-import type { StringValue } from 'ms';
 
 @Module({
   imports: [
@@ -23,7 +22,7 @@ import type { StringValue } from 'ms';
       useFactory: (config: ConfigService<Env, true>) => ({
         secret: config.get('JWT_SECRET', { infer: true }),
         signOptions: {
-          expiresIn: config.get('ACCESS_TOKEN_TTL', { infer: true }) as StringValue,
+          expiresIn: config.get('ACCESS_TOKEN_TTL', { infer: true }),
         },
       }),
     }),

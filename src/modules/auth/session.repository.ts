@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { and, eq, isNull } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
-import ms, { type StringValue } from 'ms';
+import ms from 'ms';
 import { DRIZZLE, type Db } from '../../infra/db/drizzle.module';
 import { refreshTokens, type RefreshToken } from '../../infra/db/schema';
 import { generateOpaqueToken, hashToken } from '../../common/crypto/opaque-token';
@@ -96,6 +96,6 @@ export function refreshTtlProvider() {
     provide: REFRESH_TTL_MS,
     inject: [ConfigService],
     useFactory: (config: ConfigService<Env, true>) =>
-      ms(config.get('REFRESH_TOKEN_TTL', { infer: true }) as StringValue),
+      ms(config.get('REFRESH_TOKEN_TTL', { infer: true })),
   };
 }

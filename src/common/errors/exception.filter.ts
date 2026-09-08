@@ -24,7 +24,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp();
-    const requestId = String((http.getRequest() as { id?: unknown }).id ?? 'unknown');
+    // pino-http assigns req.id; see logger.module.ts genReqId.
+    const requestId = http.getRequest<{ id?: string }>().id ?? 'unknown';
     const { status, body } = this.render(exception, requestId);
 
     if (status >= 500) {
