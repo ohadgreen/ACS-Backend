@@ -5,6 +5,7 @@ import {
   ADMIN_DATABASE_URL,
   TEST_DATABASE_URL,
   closeTestConnections,
+  getTestRedis,
   truncateAll,
 } from './db.helper';
 
@@ -30,6 +31,9 @@ beforeAll(async () => {
 
 afterEach(async () => {
   await truncateAll();
+  // Cooldowns, attempt counters and rate-limit windows all live in Redis, so a
+  // leftover key from one test silently changes the next one's behaviour.
+  await getTestRedis().flushdb();
 });
 
 afterAll(async () => {
