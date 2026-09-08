@@ -43,6 +43,9 @@ export const PROTECTED_ROUTES: Array<{
   { method: 'patch', path: `/admin/session-types/${uuidv7()}`, allow: ['admin'], body: {} },
 
   { method: 'post', path: '/operators/me/checkins', allow: ['operator'], body: {} },
+  { method: 'post', path: `/operators/me/checkins/${uuidv7()}/end`, allow: ['operator'] },
+  { method: 'post', path: '/operators/me/breaks', allow: ['operator'], body: {} },
+  { method: 'get', path: '/operators/me/schedule', allow: ['operator'] },
 ];
 
 const ALL_ROLES: Role[] = ['customer', 'operator', 'admin'];
@@ -91,6 +94,6 @@ describe('authorization matrix', () => {
   it('covers every route that is not explicitly @Public', () => {
     // A reminder rather than a reflection trick: when this count changes,
     // a row was added or a route was left out.
-    expect(PROTECTED_ROUTES).toHaveLength(12);
+    expect(PROTECTED_ROUTES).toHaveLength(15);
   });
 });

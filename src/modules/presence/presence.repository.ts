@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, lt, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { DRIZZLE, type Db } from '../../infra/db/drizzle.module';
 import { locations, operatorCheckins, operatorSlots, operators } from '../../infra/db/schema';
@@ -96,6 +96,96 @@ export class PresenceRepository {
       .where(
         and(eq(operatorCheckins.operatorId, operatorId), eq(operatorCheckins.status, 'active')),
       );
+  }
+
+  /**
+   * Cancels only this check-in's OPEN slots. Booked slots survive: going
+   * offline does not dissolve a commitment to a customer who already booked.
+   *
+   * Returns null when no such check-in belongs to that operator, which the
+   * service turns into a 404 — the operator id is part of the WHERE, so this
+   * doubles as the ownership check.
+   */
+  async endCheckin(operatorId: string, checkinId: string): Promise<number | null> {
+    return this.db.transaction(async (tx) => {
+      const [checkin] = await tx
+        .select({ id: operatorCheckins.id })
+        .from(operatorCheckins)
+        .where(
+          and(eq(operatorCheckins.id, checkinId), eq(operatorCheckins.operatorId, operatorId)),
+        );
+      if (!checkin) return null;
+
+      const cancelled = await tx
+        .update(operatorSlots)
+        .set({ status: 'cancelled', updatedAt: new Date() })
+        .where(and(eq(operatorSlots.checkinId, checkinId), eq(operatorSlots.status, 'open')))
+        .returning({ id: operatorSlots.id });
+
+      await tx
+        .update(operatorCheckins)
+        .set({ status: 'ended', endedAt: new Date() })
+        .where(eq(operatorCheckins.id, checkinId));
+
+      await tx
+        .update(operators)
+        .set({ presence: 'offline', updatedAt: new Date() })
+        .where(eq(operators.id, operatorId));
+
+      return cancelled.length;
+    });
+  }
+
+  bookedSlotsInRange(operatorId: string, from: Date, to: Date) {
+    return this.db
+      .select({ startAt: operatorSlots.startAt })
+      .from(operatorSlots)
+      .where(
+        and(
+          eq(operatorSlots.operatorId, operatorId),
+          eq(operatorSlots.status, 'booked'),
+          gte(operatorSlots.startAt, from),
+          lt(operatorSlots.startAt, to),
+        ),
+      )
+      .orderBy(asc(operatorSlots.startAt));
+  }
+
+  async cancelOpenSlotsInRange(operatorId: string, from: Date, to: Date): Promise<number> {
+    const rows = await this.db
+      .update(operatorSlots)
+      .set({ status: 'cancelled', updatedAt: new Date() })
+      .where(
+        and(
+          eq(operatorSlots.operatorId, operatorId),
+          eq(operatorSlots.status, 'open'),
+          gte(operatorSlots.startAt, from),
+          lt(operatorSlots.startAt, to),
+        ),
+      )
+      .returning({ id: operatorSlots.id });
+    return rows.length;
+  }
+
+  /** Every status, not just open: the operator needs to see the whole day. */
+  scheduleFor(operatorId: string, dayStart: Date, dayEnd: Date) {
+    return this.db
+      .select({
+        id: operatorSlots.id,
+        operatorId: operatorSlots.operatorId,
+        locationId: operatorSlots.locationId,
+        startAt: operatorSlots.startAt,
+        status: operatorSlots.status,
+      })
+      .from(operatorSlots)
+      .where(
+        and(
+          eq(operatorSlots.operatorId, operatorId),
+          gte(operatorSlots.startAt, dayStart),
+          lt(operatorSlots.startAt, dayEnd),
+        ),
+      )
+      .orderBy(asc(operatorSlots.startAt));
   }
 }
 

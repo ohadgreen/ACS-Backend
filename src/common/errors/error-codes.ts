@@ -26,6 +26,7 @@ export const ErrorCodes = {
   WINDOW_CROSSES_BUSINESS_DAY: 'WINDOW_CROSSES_BUSINESS_DAY',
   CHECKIN_TICK_CONFLICT: 'CHECKIN_TICK_CONFLICT',
   CHECKIN_NOT_FOUND: 'CHECKIN_NOT_FOUND',
+  BREAK_HAS_BOOKINGS: 'BREAK_HAS_BOOKINGS',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
