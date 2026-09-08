@@ -5,6 +5,7 @@ import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
+import { OtpRequestDto, OtpVerifyDto } from './dto/otp.dto';
 import type { AuthenticatedUser } from './auth.types';
 
 @Controller('auth')
@@ -40,4 +41,19 @@ export class AuthController {
   async logoutAll(@CurrentUser() user: AuthenticatedUser) {
     await this.auth.logoutAll(user.userId);
   }
+
+  @Public()
+  @Post('otp/request')
+  @HttpCode(204)
+  async requestOtp(@Body() dto: OtpRequestDto, @Req() req: Request) {
+    await this.auth.requestOtp(dto.phone, dto.locale, req.ip ?? 'unknown');
+  }
+
+  @Public()
+  @Post('otp/verify')
+  @HttpCode(200)
+  verifyOtp(@Body() dto: OtpVerifyDto, @Req() req: Request) {
+    return this.auth.verifyOtp(dto.phone, dto.code, req.get('user-agent') ?? null);
+  }
 }
+

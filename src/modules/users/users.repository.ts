@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
+import { uuidv7 } from 'uuidv7';
 import { DRIZZLE, type Db } from '../../infra/db/drizzle.module';
 import { operators, users, type Operator, type User } from '../../infra/db/schema';
 
@@ -39,4 +40,33 @@ export class UsersRepository {
       .limit(1);
     return row;
   }
+
+  /**
+   * Customers are created on first successful verification. display_name stays
+   * null — the OTP flow supplies no name; the client prompts for one later.
+   */
+  async upsertCustomerByPhone(phone: string, locale: string): Promise<User> {
+    const existing = await this.findByPhone(phone);
+    if (existing) {
+      const [updated] = await this.db
+        .update(users)
+        .set({ preferredLocale: locale, phoneVerifiedAt: new Date(), updatedAt: new Date() })
+        .where(eq(users.id, existing.id))
+        .returning();
+      return updated!;
+    }
+
+    const [created] = await this.db
+      .insert(users)
+      .values({
+        id: uuidv7(),
+        role: 'customer',
+        phone,
+        preferredLocale: locale,
+        phoneVerifiedAt: new Date(),
+      })
+      .returning();
+    return created!;
+  }
 }
+

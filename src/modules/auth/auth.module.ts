@@ -3,6 +3,8 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { UsersModule } from '../users/users.module';
+import { SmsModule } from '../sms/sms.module';
+import { OtpService } from './otp/otp.service';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { TokenService } from './token.service';
@@ -15,6 +17,7 @@ import type { StringValue } from 'ms';
 @Module({
   imports: [
     UsersModule,
+    SmsModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService<Env, true>) => ({
@@ -28,6 +31,7 @@ import type { StringValue } from 'ms';
   controllers: [AuthController],
   providers: [
     AuthService,
+    OtpService,
     TokenService,
     SessionRepository,
     refreshTtlProvider(),

@@ -1,9 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'node:crypto';
 import { uuidv7 } from 'uuidv7';
 import { PasswordService } from '../../common/crypto/password.service';
 import { ErrorCodes } from '../../common/errors/error-codes';
-import { ForbiddenError, UnauthorizedError } from '../../common/errors/domain-error';
+import { ForbiddenError, UnauthorizedError, ValidationError } from '../../common/errors/domain-error';
+import { RateLimiterService } from '../../common/rate-limit/rate-limiter.service';
+import { OtpService } from './otp/otp.service';
+import { normalizePhone, phoneCountry } from './phone';
+import { requireEnv, type AppConfig } from '../../infra/config/typed-config';
 import { UsersRepository } from '../users/users.repository';
 import { SessionRepository } from './session.repository';
 import { TokenService } from './token.service';
@@ -24,11 +29,23 @@ export class AuthService {
    */
   private readonly dummyHash: Promise<string>;
 
+  /**
+   * The locale chosen at request time, remembered until verification — the
+   * verify call carries no locale of its own, and the user row created there
+   * needs one.
+   */
+  private readonly pendingLocale = new Map<string, string>();
+
   constructor(
     private readonly usersRepo: UsersRepository,
     private readonly passwords: PasswordService,
     private readonly tokens: TokenService,
     private readonly sessions: SessionRepository,
+    private readonly otp: OtpService,
+    private readonly limiter: RateLimiterService,
+    // AppConfig is a type alias, so emitDecoratorMetadata records nothing for
+    // it and Nest cannot infer the token. Inject the real class explicitly.
+    @Inject(ConfigService) private readonly config: AppConfig,
   ) {
     this.dummyHash = this.passwords.hash(randomBytes(32).toString('hex'));
   }
@@ -156,5 +173,47 @@ export class AuthService {
 
   async logoutAll(userId: string): Promise<void> {
     await this.sessions.revokeAllForUser(userId);
+  }
+  async requestOtp(rawPhone: string, locale: string | undefined, ip: string): Promise<void> {
+    const phone = normalizePhone(rawPhone);
+
+    // Gate before spending anything: the MVP gateway serves one country, and
+    // reporting success for an undeliverable number is the worst outcome —
+    // the customer waits for an SMS that never arrives, and support has
+    // nothing to go on.
+    const allowed = requireEnv(this.config, 'SMS_SUPPORTED_COUNTRIES');
+    const country = phoneCountry(rawPhone);
+    if (!country || !allowed.includes(country)) {
+      throw new ValidationError(
+        ErrorCodes.PHONE_COUNTRY_UNSUPPORTED,
+        'We cannot send codes to that country yet.',
+        { field: 'phone', country: country ?? null, supported: allowed },
+      );
+    }
+
+    // Per-IP limit lives here; the per-phone cooldown and daily cap live in
+    // OtpService, which owns the code's lifecycle.
+    await this.limiter.consume(`otp:ip:${ip}`, 20, 3600);
+
+    const chosen = locale ?? requireEnv(this.config, 'DEFAULT_LOCALE');
+    await this.otp.request(phone, chosen);
+    this.pendingLocale.set(phone, chosen);
+  }
+
+  async verifyOtp(rawPhone: string, code: string, deviceInfo: string | null): Promise<TokenPair> {
+    const phone = normalizePhone(rawPhone);
+
+    // Attempt counting and lockout are inside OtpService: a wrong code returns
+    // false, while an absent or burned code throws 401 directly.
+    if (!(await this.otp.verify(phone, code))) {
+      throw new UnauthorizedError(ErrorCodes.OTP_INVALID, 'The verification code is not valid.');
+    }
+
+    const locale =
+      this.pendingLocale.get(phone) ?? requireEnv(this.config, 'DEFAULT_LOCALE');
+    this.pendingLocale.delete(phone);
+
+    const user = await this.usersRepo.upsertCustomerByPhone(phone, locale);
+    return this.issuePair(user, null, deviceInfo);
   }
 }
