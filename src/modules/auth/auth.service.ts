@@ -85,4 +85,76 @@ export class AuthService {
       refreshToken: session.token,
     };
   }
+  /**
+   * Three steps, in this order — the order IS the security property.
+   *
+   * 1. Replay check. A token already revoked or already rotated is a theft
+   *    signal, so the entire family dies, not just the presented row.
+   * 2. Re-check current status. This is what actually enforces 'approved
+   *    operators only' on an ongoing basis; a login-time check alone would let
+   *    a suspended operator refresh forever.
+   * 3. Only then rotate.
+   */
+  async refresh(refreshToken: string, deviceInfo: string | null): Promise<TokenPair> {
+    const row = await this.sessions.findByToken(refreshToken);
+    if (!row) {
+      throw new UnauthorizedError(ErrorCodes.REFRESH_TOKEN_INVALID, 'Unknown refresh token.');
+    }
+
+    if (row.revokedAt !== null || row.replacedBy !== null) {
+      await this.sessions.revokeFamily(row.familyId);
+      throw new UnauthorizedError(
+        ErrorCodes.REFRESH_TOKEN_REPLAYED,
+        'Refresh token was already used; the session family has been revoked.',
+      );
+    }
+
+    if (row.expiresAt.getTime() <= Date.now()) {
+      throw new UnauthorizedError(ErrorCodes.REFRESH_TOKEN_INVALID, 'Refresh token expired.');
+    }
+
+    const user = await this.usersRepo.findById(row.userId);
+    if (!user) {
+      throw new UnauthorizedError(ErrorCodes.REFRESH_TOKEN_INVALID, 'Unknown refresh token.');
+    }
+    if (user.status !== 'active') {
+      throw new ForbiddenError(ErrorCodes.ACCOUNT_SUSPENDED, 'This account cannot sign in.', {
+        status: user.status,
+      });
+    }
+
+    let operatorId: string | undefined;
+    if (user.role === 'operator') {
+      const operator = await this.usersRepo.findOperatorByUserId(user.id);
+      if (operator?.approvalStatus !== 'approved') {
+        throw new ForbiddenError(
+          ErrorCodes.OPERATOR_NOT_APPROVED,
+          'Operator is not approved to work.',
+          { approvalStatus: operator?.approvalStatus ?? 'missing' },
+        );
+      }
+      operatorId = operator.id;
+    }
+
+    const rotated = await this.sessions.rotate(row.id, user.id, row.familyId, deviceInfo);
+
+    return {
+      accessToken: this.tokens.issueAccessToken({
+        sub: user.id,
+        role: user.role as Role,
+        operatorId,
+        jti: uuidv7(),
+      }),
+      refreshToken: rotated.token,
+    };
+  }
+
+  async logout(refreshToken: string): Promise<void> {
+    const row = await this.sessions.findByToken(refreshToken);
+    if (row) await this.sessions.revokeById(row.id);
+  }
+
+  async logoutAll(userId: string): Promise<void> {
+    await this.sessions.revokeAllForUser(userId);
+  }
 }

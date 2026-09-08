@@ -1,8 +1,11 @@
 import { Body, Controller, HttpCode, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { Public } from '../../common/auth/public.decorator';
+import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
+import { RefreshDto } from './dto/refresh.dto';
+import type { AuthenticatedUser } from './auth.types';
 
 @Controller('auth')
 export class AuthController {
@@ -13,5 +16,28 @@ export class AuthController {
   @HttpCode(200)
   login(@Body() dto: LoginDto, @Req() req: Request) {
     return this.auth.login(dto.email, dto.password, req.get('user-agent') ?? null);
+  }
+
+  @Public()
+  @Post('refresh')
+  @HttpCode(200)
+  refresh(@Body() dto: RefreshDto, @Req() req: Request) {
+    return this.auth.refresh(dto.refreshToken, req.get('user-agent') ?? null);
+  }
+
+  // Public: logging out must work even once the access token has expired.
+  @Public()
+  @Post('logout')
+  @HttpCode(204)
+  async logout(@Body() dto: RefreshDto) {
+    await this.auth.logout(dto.refreshToken);
+  }
+
+  // Authenticated: revoking every session is a privileged act on your own
+  // account, so it needs a valid access token rather than one refresh token.
+  @Post('logout-all')
+  @HttpCode(204)
+  async logoutAll(@CurrentUser() user: AuthenticatedUser) {
+    await this.auth.logoutAll(user.userId);
   }
 }
