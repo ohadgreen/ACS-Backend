@@ -12,12 +12,14 @@
 
 **Phase 2** (locations, check-in, slots, discovery, bookings) is a separate plan: `2026-09-06-acs-backend-phase2-booking-loop.md`. Do not start it until this plan is complete and reviewed.
 
+> **Implemented** on branch `feat/phase1-foundation-auth`, commits a52fcc2..42b1013. Per-task commit messages record every deviation from this plan and why.
+
 ## Global Constraints
 
 Every task's requirements implicitly include this section. Values are copied verbatim from the spec.
 
-- **Node.js 22 LTS.** TypeScript with `strict: true` and `noUncheckedIndexedAccess: true`.
-- **Package manager is pnpm.** Never npm or yarn.
+- **Node.js 22 LTS or newer.** TypeScript with `strict: true` and `noUncheckedIndexedAccess: true`. *(Built and verified on Node 26.4.0.)*
+- **Package manager is pnpm.** Never npm or yarn. *(pnpm 12: build scripts are blocked by default and the package.json `pnpm` field is ignored — allowed builds live in `pnpm-workspace.yaml`, written by `pnpm approve-builds`.)*
 - **All timestamps are `timestamptz` stored in UTC.** The business timezone (`BUSINESS_TIMEZONE`, default `Asia/Jerusalem`) lives in config and is the only place "today" is computed. No bare `new Date()` for business-day logic.
 - **Primary keys are UUIDv7, generated in the application** — never `gen_random_uuid()`, never UUIDv4.
 - **Money is `numeric(10,2)` with an explicit ISO-4217 `currency` column.** Never floating point.
