@@ -1,5 +1,34 @@
 # ACS Backend Phase 2 — Core Booking Loop Implementation Plan
 
+> **IMPLEMENTED — 2026-09-08.** Tasks 16–26 are all in `main`'s history. This
+> file is kept as the record of what was followed, not as documentation: read
+> `AGENTS.md` and the code for how the system works now.
+>
+> Every deviation from this plan is recorded in the commit that made it, with
+> the reason. The substantive ones, for anyone reading the plan on its own:
+>
+> - **Task 24's fairness query needs `FOR UPDATE OF s SKIP LOCKED`.** Postgres
+>   refuses row locking on the nullable side of an outer join, so the plain
+>   `FOR UPDATE SKIP LOCKED` written below is rejected outright once the
+>   `LEFT JOIN LATERAL` is present — no booking would ever have succeeded.
+> - **`bookings.operator_slot_id` carries a partial unique index over the
+>   active statuses, not a plain `.unique()` column.** A total constraint
+>   contradicts the cancellation policy in Task 25: releasing a slot back to
+>   `open` for resale would leave it permanently unsellable.
+> - **Task 22's `todayAt(hour)` fixtures could not have passed.** Discovery
+>   serves `[now + BOOKING_LEAD_TIME_MIN, end of today)`, and 21:00Z — used for
+>   the capacity assertion — is exactly the *end* of the Asia/Jerusalem business
+>   day in summer. Fixtures now derive their tick from the clock.
+> - **`z.coerce.date()` cannot be used in a DTO.** It has no JSON Schema
+>   representation and zod throws while the OpenAPI document is built, killing
+>   the process at boot rather than at first request. The date fields parse with
+>   `z.iso.datetime({ offset: true }).transform(...)` instead.
+> - **Non-creating POST routes need `@HttpCode(200)`.** Nest answers POST with
+>   201 by default, which several of the plan's own assertions contradicted.
+> - **Schema tests assert constraint names off the error cause chain.** Drizzle
+>   wraps driver errors, so `rejects.toThrow(/grid_aligned/)` never matches the
+>   message and would pass on any failure at all.
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the technical heart of the product — admin-curated locations with per-location session types, operator check-in materializing a fixed 15-minute slot grid, geo discovery, and booking with atomic fair operator assignment plus a pure-domain lifecycle state machine.
