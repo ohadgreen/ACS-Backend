@@ -16,7 +16,7 @@ function chain(cause: unknown): PgErrorShape[] {
   const found: PgErrorShape[] = [];
   let current: unknown = cause;
   for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth += 1) {
-    found.push(current as PgErrorShape);
+    found.push(current);
     current = (current as { cause?: unknown }).cause;
   }
   return found;
