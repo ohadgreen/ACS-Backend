@@ -5,7 +5,6 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { BookingsService } from './bookings.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { CancelBookingDto } from './dto/cancel-booking.dto';
-import type { ActorKind } from './domain/types';
 
 @Controller('bookings')
 export class BookingsController {
@@ -49,7 +48,9 @@ export class BookingsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CancelBookingDto,
   ) {
-    return this.bookings.act(id, 'CANCEL', user.role as ActorKind, user, dto.reason);
+    // Role and ActorKind agree on every value a token can carry; 'system' is
+    // the one ActorKind no request can present.
+    return this.bookings.act(id, 'CANCEL', user.role, user, dto.reason);
   }
 
   @Roles('operator')

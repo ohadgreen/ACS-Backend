@@ -23,7 +23,6 @@ let sessionTypeId: string;
 const LAT = 33.3053;
 const LNG = 35.7896;
 const SLOT_MS = 15 * 60_000;
-const LEAD_MS = 5 * 60_000;
 const LATE_MS = 60 * 60_000;
 
 let phoneSeq = 0;
