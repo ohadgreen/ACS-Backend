@@ -15,6 +15,13 @@
       "when": 1788857110844,
       "tag": "0001_locations",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788857577292,
+      "tag": "0002_slots",
+      "breakpoints": true
     }
   ]
 }
