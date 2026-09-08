@@ -1,13 +1,16 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { DRIZZLE, type Db } from '../../infra/db/drizzle.module';
 import {
   bookings,
   locationSessionTypes,
+  operatorCheckins,
   operatorSlots,
+  operators,
   type Booking,
 } from '../../infra/db/schema';
+import type { ActorKind, BookingStatus, StampField } from './domain/types';
 
 export interface CreateBookingInput {
   locationId: string;
@@ -100,5 +103,89 @@ export class BookingsRepository {
   async findById(id: string): Promise<Booking | undefined> {
     const [row] = await this.db.select().from(bookings).where(eq(bookings.id, id));
     return row;
+  }
+
+  /**
+   * Persists a decision the pure state machine already made. The service never
+   * decides here; this method only writes.
+   *
+   * operators.presence is maintained in the SAME transaction as the status
+   * change, so presence can never disagree with the booking it describes.
+   * START is the only thing that ever sets 'in_session'.
+   */
+  async applyTransition(
+    bookingId: string,
+    result: {
+      next: BookingStatus;
+      stampField: StampField;
+      lateCancellation: boolean;
+      releaseSlot: boolean;
+    },
+    actor: ActorKind,
+    reason: string | null,
+  ): Promise<Booking> {
+    return this.db.transaction(async (tx) => {
+      const now = new Date();
+      const patch: Record<string, unknown> = {
+        status: result.next,
+        updatedAt: now,
+        [result.stampField]: now,
+      };
+
+      if (result.next === 'completed') patch.completedAt = now;
+      if (result.next === 'cancelled') {
+        patch.cancelledBy = actor;
+        patch.cancellationReason = reason;
+        patch.lateCancellation = result.lateCancellation;
+      }
+
+      const [updated] = await tx
+        .update(bookings)
+        .set(patch as never)
+        .where(eq(bookings.id, bookingId))
+        .returning();
+
+      const booking = updated!;
+
+      // Cancellation returns inventory to sale only while there is still
+      // meaningful notice; otherwise the slot stays withdrawn.
+      if (result.releaseSlot) {
+        await tx
+          .update(operatorSlots)
+          .set({ status: 'open', updatedAt: now })
+          .where(eq(operatorSlots.id, booking.operatorSlotId));
+      } else if (result.next === 'cancelled') {
+        await tx
+          .update(operatorSlots)
+          .set({ status: 'cancelled', updatedAt: now })
+          .where(eq(operatorSlots.id, booking.operatorSlotId));
+      }
+
+      if (result.next === 'in_progress') {
+        await tx
+          .update(operators)
+          .set({ presence: 'in_session', updatedAt: now })
+          .where(eq(operators.id, booking.operatorId));
+      } else if (result.next === 'completed') {
+        // Back to online, unless the operator's check-in has since ended.
+        const [active] = await tx
+          .select({ id: operatorCheckins.id })
+          .from(operatorCheckins)
+          .where(
+            and(
+              eq(operatorCheckins.operatorId, booking.operatorId),
+              eq(operatorCheckins.status, 'active'),
+            ),
+          )
+          .limit(1);
+
+        await tx
+          .update(operators)
+          .set({ presence: active ? 'online' : 'offline', updatedAt: now })
+          .where(eq(operators.id, booking.operatorId));
+      }
+
+      return booking;
+    });
   }
 }

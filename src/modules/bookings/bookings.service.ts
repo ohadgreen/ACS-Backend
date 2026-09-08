@@ -1,6 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ConflictError, ForbiddenError, ValidationError } from '../../common/errors/domain-error';
+import {
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from '../../common/errors/domain-error';
 import { ErrorCodes } from '../../common/errors/error-codes';
 import { isGridAligned } from '../../common/time/grid';
 import { businessDayBounds } from '../../common/time/business-day';
@@ -9,6 +14,9 @@ import { requireEnv, type AppConfig } from '../../infra/config/typed-config';
 import { LocationsRepository } from '../locations/locations.repository';
 import { UsersRepository } from '../users/users.repository';
 import { BookingsRepository } from './bookings.repository';
+import { transition } from './domain/state-machine';
+import type { ActorKind, BookingEvent } from './domain/types';
+import type { AuthenticatedUser } from '../auth/auth.types';
 
 export interface CreateBookingRequest {
   locationId: string;
@@ -95,5 +103,48 @@ export class BookingsService {
       }
       throw cause;
     }
+  }
+
+  /**
+   * Ownership first, then the pure machine, then persistence. The machine is
+   * given the time rather than reading a clock, so this method is the only
+   * place `Date.now()` enters a transition.
+   */
+  async act(
+    bookingId: string,
+    event: BookingEvent,
+    actor: ActorKind,
+    caller: AuthenticatedUser,
+    reason?: string,
+  ) {
+    const booking = await this.repo.findById(bookingId);
+    if (!booking) {
+      throw new NotFoundError(ErrorCodes.BOOKING_NOT_FOUND, 'No such booking.');
+    }
+
+    const permitted =
+      caller.role === 'admin' ||
+      (caller.role === 'customer' && booking.customerId === caller.userId) ||
+      (caller.role === 'operator' && booking.operatorId === caller.operatorId);
+    if (!permitted) {
+      throw new ForbiddenError(ErrorCodes.FORBIDDEN, 'You are not a party to this booking.');
+    }
+
+    const result = transition(booking.status, event, actor, {
+      now: new Date(),
+      startAt: booking.startAt,
+      lateCancellationMin: requireEnv(this.config, 'LATE_CANCELLATION_MIN'),
+      bookingLeadTimeMin: requireEnv(this.config, 'BOOKING_LEAD_TIME_MIN'),
+    });
+
+    if (!result.ok) {
+      throw new ConflictError(result.code, 'That action is not allowed in the current state.', {
+        from: booking.status,
+        event,
+        actor,
+      });
+    }
+
+    return this.repo.applyTransition(bookingId, result, actor, reason ?? null);
   }
 }
