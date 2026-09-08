@@ -23,8 +23,12 @@ inventory, discovery, bookings) is fully planned but not started.
 | Document | Path |
 |---|---|
 | Approved design spec | `docs/superpowers/specs/2026-09-02-acs-backend-foundation-booking-design.md` |
-| Phase 1 plan (done) | `docs/superpowers/plans/2026-09-06-acs-backend-phase1-foundation-auth.md` |
+| Phase 1 plan (executed) | `docs/superpowers/plans/completed/2026-09-06-acs-backend-phase1-foundation-auth.md` |
 | Phase 2 plan (next) | `docs/superpowers/plans/2026-09-06-acs-backend-phase2-booking-loop.md` |
+
+Plans under `completed/` are history, not documentation: they are the instructions that were
+followed, kept because six commit messages cite "deviations from the plan" and are
+unreadable without them. For how the code works *now*, read this file and the code.
 
 The spec is the authority on *why* things are shaped as they are. If you're about to change a
 constraint, read the relevant section first — most of them exist to prevent a specific bug.

@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-02-acs-backend-foundation-booking-design.md`
 
-**Prerequisite:** `2026-09-06-acs-backend-phase1-foundation-auth.md` must be complete, with its completion checklist satisfied. Task numbering continues from Phase 1 (which ended at Task 15).
+**Prerequisite:** `completed/2026-09-06-acs-backend-phase1-foundation-auth.md` must be complete, with its completion checklist satisfied. Task numbering continues from Phase 1 (which ended at Task 15).
 
 ## Global Constraints
 
