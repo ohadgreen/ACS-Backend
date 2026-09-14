@@ -2,3 +2,9 @@ allowBuilds:
   '@scarf/scarf': true
   '@swc/core': true
   esbuild: true
+
+minimumReleaseAgeExclude:
+  - multer@2.4.0
+
+overrides:
+  multer: ^2.4.0
