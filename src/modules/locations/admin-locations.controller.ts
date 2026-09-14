@@ -1,9 +1,11 @@
 import { Body, Controller, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/auth/roles.decorator';
 import { LocationsService } from './locations.service';
 import { CreateLocationDto, UpdateLocationDto } from './dto/location.dto';
 import { CreateSessionTypeDto, UpdateSessionTypeDto } from './dto/session-type.dto';
 
+@ApiBearerAuth()
 @Roles('admin')
 @Controller('admin')
 export class AdminLocationsController {

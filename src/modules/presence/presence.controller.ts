@@ -8,6 +8,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/auth/roles.decorator';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { requireOperatorId } from '../operators/operators.controller';
@@ -16,6 +17,7 @@ import { PresenceService } from './presence.service';
 import { CheckinDto } from './dto/checkin.dto';
 import { BreakDto } from './dto/break.dto';
 
+@ApiBearerAuth()
 @Roles('operator')
 @Controller('operators/me')
 export class PresenceController {

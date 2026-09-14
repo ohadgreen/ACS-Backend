@@ -1,10 +1,12 @@
 import { Body, Controller, ForbiddenException, Get, Patch } from '@nestjs/common';
+import { ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/auth/roles.decorator';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { OperatorsService } from './operators.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
+@ApiBearerAuth()
 @Roles('operator')
 @Controller('operators/me')
 export class OperatorsController {

@@ -1,5 +1,6 @@
 import { Body, Controller, HttpCode, Param, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
+import { ApiBearerAuth } from '@nestjs/swagger';
 import { Public } from '../../common/auth/public.decorator';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { AuthService } from './auth.service';
@@ -42,6 +43,7 @@ export class AuthController {
 
   // Authenticated: revoking every session is a privileged act on your own
   // account, so it needs a valid access token rather than one refresh token.
+  @ApiBearerAuth()
   @Post('logout-all')
   @HttpCode(204)
   async logoutAll(@CurrentUser() user: AuthenticatedUser) {
