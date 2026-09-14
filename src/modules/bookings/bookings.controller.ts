@@ -8,6 +8,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/auth/roles.decorator';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { requireOperatorId } from '../operators/operators.controller';
@@ -17,6 +18,7 @@ import { BookingAccessGuard } from './booking-access.guard';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { CancelBookingDto } from './dto/cancel-booking.dto';
 
+@ApiBearerAuth()
 @Controller('bookings')
 export class BookingsController {
   constructor(private readonly bookings: BookingsService) {}

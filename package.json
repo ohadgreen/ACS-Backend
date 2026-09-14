@@ -15,8 +15,8 @@
     "start:dev": "node -r @swc-node/register src/main.ts",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "migrate": "node -r @swc-node/register src/cli/migrate.ts",
-    "seed:admin": "node -r @swc-node/register src/cli/seed-admin.ts",
+    "migrate": "node --env-file-if-exists=.env -r @swc-node/register src/cli/migrate.ts",
+    "seed:admin": "node --env-file-if-exists=.env -r @swc-node/register src/cli/seed-admin.ts",
     "lint": "eslint .",
     "migrate:generate": "drizzle-kit generate"
   },

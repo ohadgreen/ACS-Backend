@@ -1,7 +1,9 @@
 import { Controller, HttpCode, Post } from '@nestjs/common';
+import { ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/auth/roles.decorator';
 import { MaintenanceService } from './maintenance.service';
 
+@ApiBearerAuth()
 @Roles('admin')
 @Controller('admin/maintenance')
 export class MaintenanceController {

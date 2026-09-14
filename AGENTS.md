@@ -49,6 +49,12 @@ pnpm start:dev
 **pnpm only.** Never npm or yarn — the lockfile and the `pnpm-workspace.yaml` build-allowlist
 are both pnpm-specific.
 
+The CLI entry points read `process.env` directly — they never build a Nest container, so
+`ConfigModule` is not there to load `.env` for them. Their scripts pass
+`--env-file-if-exists=.env` so the file is loaded before the script runs. Without it both fail
+with `DATABASE_URL is not set.`; to point one at another database, set the variable in the
+environment, which takes precedence over the file.
+
 ## Commands
 
 | Command | Notes |

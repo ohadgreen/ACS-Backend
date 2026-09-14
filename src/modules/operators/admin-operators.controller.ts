@@ -1,10 +1,12 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/auth/roles.decorator';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { OperatorsService } from './operators.service';
 import { CreateOperatorDto } from './dto/create-operator.dto';
 
+@ApiBearerAuth()
 @Roles('admin')
 @Controller('admin/operators')
 export class AdminOperatorsController {
