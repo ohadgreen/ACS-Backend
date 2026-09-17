@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { uuidv7 } from 'uuidv7';
 import { Test } from '@nestjs/testing';
+import { Queue } from 'bullmq';
 import { AppConfigModule } from '../../src/infra/config/config.module';
 import { DrizzleModule } from '../../src/infra/db/drizzle.module';
 import { users } from '../../src/infra/db/schema';
@@ -8,7 +9,9 @@ import { UsersModule } from '../../src/modules/users/users.module';
 import { NotificationsModule } from '../../src/modules/notifications/notifications.module';
 import { NotificationsWorkerModule } from '../../src/modules/notifications/notifications.worker.module';
 import { QueueModule } from '../../src/infra/queue/queue.module';
+import { PUSH_QUEUE_TOKEN } from '../../src/infra/queue/queue.constants';
 import { PushProcessor } from '../../src/modules/notifications/push.processor';
+import { NotificationsService } from '../../src/modules/notifications/notifications.service';
 import { DevicesRepository } from '../../src/modules/notifications/devices.repository';
 import { PUSH_PROVIDER } from '../../src/modules/notifications/push-provider';
 import type { FakePushProvider } from '../../src/modules/notifications/fake-push.provider';
@@ -20,6 +23,8 @@ let moduleRef: Awaited<ReturnType<ReturnType<typeof Test.createTestingModule>['c
 let processor: PushProcessor;
 let devices: DevicesRepository;
 let push: FakePushProvider;
+let notifications: NotificationsService;
+let queue: Queue;
 
 beforeAll(async () => {
   moduleRef = await Test.createTestingModule({
@@ -36,6 +41,8 @@ beforeAll(async () => {
   processor = moduleRef.get(PushProcessor);
   devices = moduleRef.get(DevicesRepository);
   push = moduleRef.get<FakePushProvider>(PUSH_PROVIDER);
+  notifications = moduleRef.get(NotificationsService);
+  queue = moduleRef.get<Queue>(PUSH_QUEUE_TOKEN);
 });
 
 afterAll(async () => {
@@ -134,5 +141,34 @@ describe('push processor', () => {
     await expect(
       processor.handle({ userId, key: 'SESSION_STARTING', data: {} }),
     ).resolves.toBeUndefined();
+    // A malformed message says nothing about whether the device is alive.
+    expect(await devices.listActiveFor(userId)).toEqual(['tok-invalid']);
+  });
+});
+
+describe('notification producer', () => {
+  it('enqueues a payload that carries ids only, not tokens or locale', async () => {
+    const userId = uuidv7();
+
+    await notifications.notify(userId, 'SESSION_STARTING', { bookingId: 'b1' });
+
+    const [job] = await queue.getWaiting();
+    expect(job!.data).toEqual({ userId, key: 'SESSION_STARTING', data: { bookingId: 'b1' } });
+    // The regression this guards: resolving tokens/locale at enqueue time
+    // instead of at send time, which would push to a token revoked in the
+    // interim after a retry backoff.
+    expect(job!.data).not.toHaveProperty('token');
+    expect(job!.data).not.toHaveProperty('tokens');
+    expect(job!.data).not.toHaveProperty('locale');
+  });
+
+  it('sets retry options so a TRANSIENT failure actually gets retried', async () => {
+    const userId = uuidv7();
+
+    await notifications.notify(userId, 'SESSION_STARTING', {});
+
+    const [job] = await queue.getWaiting();
+    expect(job!.opts.attempts).toBe(5);
+    expect(job!.opts.backoff).toEqual({ type: 'exponential', delay: 2000 });
   });
 });
