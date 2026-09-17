@@ -68,7 +68,7 @@ export class ExpoPushProvider implements PushProvider {
       return allTransient();
     }
 
-    const payload = (await response.clone().json()) as { data?: ExpoTicket[] };
+    const payload = (await response.json()) as { data?: ExpoTicket[] };
     const tickets = payload.data ?? [];
 
     return batch.map((m, index) => {

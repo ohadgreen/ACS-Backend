@@ -5,8 +5,13 @@ const provider = () => new ExpoPushProvider(undefined);
 const message = (token: string) => ({ token, title: 'T', body: 'B' });
 
 const respondWith = (body: unknown, status = 200) =>
-  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }),
+  vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+    Promise.resolve(
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ),
   );
 
 afterEach(() => {
