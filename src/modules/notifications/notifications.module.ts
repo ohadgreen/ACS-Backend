@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { requireEnv, type AppConfig } from '../../infra/config/typed-config';
+import { DevicesController } from './devices.controller';
 import { DevicesRepository } from './devices.repository';
 import { NotificationsService } from './notifications.service';
 import { ExpoPushProvider } from './expo-push.provider';
@@ -12,6 +13,7 @@ import { PUSH_PROVIDER, type PushProvider } from './push-provider';
  * means one more class and one more case here; nothing that sends changes.
  */
 @Module({
+  controllers: [DevicesController],
   providers: [
     DevicesRepository,
     NotificationsService,

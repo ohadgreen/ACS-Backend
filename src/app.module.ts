@@ -11,6 +11,7 @@ import { BookingsModule } from './modules/bookings/bookings.module';
 import { DiscoveryModule } from './modules/discovery/discovery.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { OperatorsModule } from './modules/operators/operators.module';
 import { PresenceModule } from './modules/presence/presence.module';
 import { SmsModule } from './modules/sms/sms.module';
@@ -34,6 +35,7 @@ import { UsersModule } from './modules/users/users.module';
     PresenceModule,
     DiscoveryModule,
     BookingsModule,
+    NotificationsModule,
     MaintenanceModule,
     HealthModule,
   ],
