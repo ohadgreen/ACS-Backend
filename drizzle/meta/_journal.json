@@ -29,6 +29,13 @@
       "when": 1788858950804,
       "tag": "0003_bookings",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789645506501,
+      "tag": "0004_mighty_jackal",
+      "breakpoints": true
     }
   ]
 }
