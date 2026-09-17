@@ -6,3 +6,6 @@ coverage/
 
 # VSCode Local History extension
 .history/
+
+# Subagent-driven-development scratch: ledgers, task briefs, review packages
+.superpowers/
