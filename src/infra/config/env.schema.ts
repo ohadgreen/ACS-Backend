@@ -56,6 +56,19 @@ export const envSchema = z
     CHECKIN_LOCATION_TOLERANCE_M: z.coerce.number().int().positive().default(150),
     BOOKING_LEAD_TIME_MIN: z.coerce.number().int().nonnegative().default(5),
     LATE_CANCELLATION_MIN: z.coerce.number().int().nonnegative().default(60),
+
+    // Push transport. EXPO_ACCESS_TOKEN is deliberately NOT conditionally
+    // required the way the SMS credentials are: Expo accepts unauthenticated
+    // sends unless a project opts into enhanced security, so demanding one
+    // would block the common case at boot for no safety gain.
+    PUSH_PROVIDER: z.enum(['expo', 'fake']).default('expo'),
+    EXPO_ACCESS_TOKEN: z.string().optional(),
+
+    // Namespaces BullMQ's Redis keys, so a shared Redis cannot cross
+    // environments' queues into each other.
+    QUEUE_PREFIX: z.string().default('acs'),
+    SCHEDULER_TICK_SEC: z.coerce.number().int().positive().default(15),
+    WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
   })
   .superRefine((env, ctx) => {
     if (!env.SUPPORTED_LOCALES.includes(env.DEFAULT_LOCALE)) {

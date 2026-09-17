@@ -9,7 +9,7 @@ export default defineConfig({
     globals: false,
     // Explicit rather than relying on Vitest's implicit default: the config
     // module keys off this to ignore a developer's local .env file.
-    env: { NODE_ENV: 'test' },
+    env: { NODE_ENV: 'test', PUSH_PROVIDER: 'fake' },
     include: ['src/**/*.spec.ts'],
     environment: 'node',
   },
