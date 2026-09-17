@@ -4,6 +4,7 @@ import { RateLimitModule } from './common/rate-limit/rate-limit.module';
 import { AppLoggerModule } from './common/logging/logger.module';
 import { AppConfigModule } from './infra/config/config.module';
 import { DrizzleModule } from './infra/db/drizzle.module';
+import { QueueModule } from './infra/queue/queue.module';
 import { RedisModule } from './infra/redis/redis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
@@ -24,6 +25,7 @@ import { UsersModule } from './modules/users/users.module';
     RateLimitModule,
     DrizzleModule,
     RedisModule,
+    QueueModule,
     UsersModule,
     SmsModule,
     AuthModule,
