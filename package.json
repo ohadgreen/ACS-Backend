@@ -13,6 +13,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/main.js",
     "start:dev": "node -r @swc-node/register src/main.ts",
+    "start:worker": "node dist/worker.js",
+    "start:worker:dev": "node -r @swc-node/register src/worker.ts",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "migrate": "node --env-file-if-exists=.env -r @swc-node/register src/cli/migrate.ts",
