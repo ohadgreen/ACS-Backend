@@ -48,7 +48,7 @@ export const PROTECTED_ROUTES: Array<{
   { method: 'get', path: '/operators/me/schedule', allow: ['operator'] },
 
   { method: 'post', path: '/bookings', allow: ['customer'], body: {} },
-  { method: 'post', path: `/bookings/${uuidv7()}/ack`, allow: ['customer'] },
+  { method: 'post', path: `/bookings/${uuidv7()}/ack`, allow: ['customer', 'operator'] },
   { method: 'post', path: `/bookings/${uuidv7()}/start`, allow: ['operator'] },
   { method: 'post', path: `/bookings/${uuidv7()}/end`, allow: ['operator'] },
   {
