@@ -17,15 +17,17 @@ Don't reintroduce the old term.
 
 ## Status
 
-**Phase 1 (foundation + auth) and Phase 2 (locations, check-in, slot inventory, discovery,
-bookings) are both implemented.** Nothing is planned beyond them: sub-projects #3–#5 (job
-queue and scheduling, media pipeline, payments) have no spec yet.
+**Phases 1 (foundation + auth), 2 (locations, check-in, slot inventory, discovery, bookings)
+and 3 (queue, worker, push notifications, session readiness) are implemented.** Sub-projects
+#4 (media pipeline) and #5 (payments) have no spec yet.
 
 | Document | Path |
 |---|---|
 | Approved design spec | `docs/superpowers/specs/2026-09-02-acs-backend-foundation-booking-design.md` |
+| Phase 3 design spec | `docs/superpowers/specs/2026-09-16-acs-backend-phase3-scheduling-notifications-design.md` |
 | Phase 1 plan (executed) | `docs/superpowers/plans/completed/2026-09-06-acs-backend-phase1-foundation-auth.md` |
 | Phase 2 plan (executed) | `docs/superpowers/plans/completed/2026-09-06-acs-backend-phase2-booking-loop.md` |
+| Phase 3 plan (executed) | `docs/superpowers/plans/completed/2026-09-16-acs-backend-phase3-scheduling-notifications.md` |
 
 Plans under `completed/` are history, not documentation: they are the instructions that were
 followed, kept because many commit messages cite "deviations from the plan" and are
@@ -44,6 +46,7 @@ cp .env.example .env          # SMS_PROVIDER=fake needs no gateway account
 pnpm migrate                  # applies migrations AND creates the postgis extension
 pnpm seed:admin admin@example.com 'a-long-admin-password' 'Admin'
 pnpm start:dev
+pnpm start:worker:dev         # second process: queue consumers + the scheduler tick
 ```
 
 **pnpm only.** Never npm or yarn — the lockfile and the `pnpm-workspace.yaml` build-allowlist
@@ -66,6 +69,7 @@ environment, which takes precedence over the file.
 | `pnpm build` | Uses `tsconfig.build.json` (excludes specs and CLI) |
 | `pnpm migrate` | **Use this, not `drizzle-kit migrate`** — see Traps |
 | `pnpm migrate:generate` | `drizzle-kit generate` after editing schema |
+| `pnpm start:worker:dev` | The worker process — nothing scheduled runs without it |
 
 Run all five checks before claiming work is done: `typecheck`, `lint`, `test:unit`,
 `test:integration`, `build`.
@@ -75,6 +79,8 @@ Run all five checks before claiming work is done: `typecheck`, `lint`, `test:uni
 ```
 src/
   main.ts                  API bootstrap (helmet, trust proxy, global filter/pipe, OpenAPI)
+  worker.ts                Worker bootstrap (no HTTP listener)
+  worker.module.ts         Consumer-side module graph
   common/
     auth/                  JwtAuthGuard, RolesGuard, @Public, @Roles, @CurrentUser
     crypto/                argon2id passwords, opaque token generation/hashing
@@ -87,6 +93,7 @@ src/
   infra/
     config/                zod env schema, requireEnv helper
     db/                    drizzle client, schema/, types.ts (geography), pg-error.ts, migrations
+    queue/                 BullMQ connection + push queue producer
     redis/
   modules/
     auth/                  login, refresh rotation, otp/ (OtpService + templates), phone.ts
@@ -97,7 +104,9 @@ src/
     presence/              check-in (slot materialization), check-out, breaks, schedule
     discovery/             the ST_DWithin query and its two public read endpoints
     bookings/              domain/ (pure state machine), fairness query, lifecycle, access guard
-    maintenance/           expiry sweep, admin-triggerable
+    notifications/         PushProvider port + Expo/fake adapters, templates, devices, processor
+    scheduling/            the repeatable tick, readiness claim scan
+    maintenance/           expiry sweep, admin-triggerable and on the tick
     health/
   cli/                     migrate, seed-admin
 test/
@@ -118,7 +127,7 @@ subclasses; only `common/errors/exception.filter.ts` knows about HTTP status cod
   for anonymous and 403 for every non-permitted role. It's the standing defense against
   object-level authorization bugs; a missing row is a visible gap. It ends with a row-count
   assertion, so adding a route without a row fails the suite rather than passing quietly —
-  update the count deliberately, not reflexively. Currently 24 rows for 24 non-`@Public()`
+  update the count deliberately, not reflexively. Currently 26 rows for 26 non-`@Public()`
   routes; the `@Public()` set is `/auth/*` except `logout-all`, `/discovery/*`, and
   `/health*`.
 - **A booking has two owners**, so it has no `me`-shaped URL. `BookingAccessGuard` is the
@@ -155,6 +164,20 @@ subclasses; only `common/errors/exception.filter.ts` knows about HTTP status cod
 - **Secrets:** `JWT_SECRET` and `OTP_SECRET` are deliberately separate. Don't merge them.
 - **SMS vendors:** no vendor name may appear outside `src/modules/sms/`. The `SmsProvider`
   port is one method; adding InforU or similar is a new adapter plus a case in `sms.module.ts`.
+- **Postgres owns the schedule; BullMQ owns dispatch.** Time-driven work ("what is due now")
+  is a set-based scan on the scheduler tick. Event-driven work ("send this push", and #4's
+  "process this video") is a queued job. Do not reach for a delayed job to remember that
+  something is owed later: Redis here has no persistence configured, so a restart would drop
+  it with nothing in the database aware.
+- **Processors are declared only in `WorkerModule`'s graph**, never in a module `AppModule`
+  imports. That is what makes it structurally impossible for the API process to consume jobs;
+  a runtime flag would eventually be set wrong in one environment.
+- **Push vendors:** no vendor name may appear outside `src/modules/notifications/`, the same
+  rule as `src/modules/sms/`. The `PushProvider` port is one method.
+- **A push is the one place the server resolves a locale.** The OS renders the text, so the
+  client cannot localize it afterwards. `users.preferred_locale` plus `push-templates.ts`,
+  exactly as `otp-templates.ts` does for SMS. Everything else still returns whole
+  `LocalizedText` objects.
 
 ## Traps
 
@@ -228,6 +251,34 @@ by hand in the generated migration. drizzle-kit also omits GIST indexes for thos
 repeated verbatim in `onConflictDoNothing({ target, where })` for Postgres to infer the
 partial index — and note it is `where` there, not `targetWhere` (that name is doUpdate-only).
 
+**BullMQ needs its own ioredis connection.** It requires `maxRetriesPerRequest: null`, and the
+shared `REDIS` provider sets `2` — which aborts the long blocking reads its workers depend on.
+`infra/queue/queue.module.ts` constructs a separate client and closes it itself. Don't
+"deduplicate" the two.
+
+**`onConflictDoUpdate` spells the partial-index predicate `targetWhere`.** `onConflictDoNothing`
+spells the same thing `where` (already noted above), which is exactly why this one gets written
+backwards. Wrong, and the partial index is not inferred — the upsert fails at runtime.
+
+**Register repeatable jobs with `upsertJobScheduler`, not `queue.add({ repeat })`.** The older
+API derives a repeatable job's identity from its options, so changing `SCHEDULER_TICK_SEC`
+leaves the previous schedule registered alongside the new one and the tick silently runs twice.
+
+**The worker needs `app.enableShutdownHooks()`.** `createApplicationContext` does not install
+signal handlers, so without it `onApplicationShutdown` never fires on SIGTERM and a redeploy
+leaves in-flight jobs stalled until their locks expire.
+
+**The expiry sweep's grace period is load-bearing.** `sweepExpired` expires bookings older than
+`start_at + SLOT_DURATION_MIN`, not `start_at`. It runs on a 15-second tick: simplify the
+predicate back and every booking is expired at its own start time, before the customer can
+answer the session-start notification and before the operator can press start.
+`test/integration/sweep-grace.spec.ts` pins it.
+
+**A booking fixture's `start_at` must sit on the 15-minute grid.** `operator_slots.grid_aligned`
+rejects anything else, and a booking hangs off a slot — so a scan test pins the booking to a
+real tick and moves the scan's `now` rather than the other way round. `seedBookableBooking` in
+`test/integration/booking.fixture.ts` is the shared seed.
+
 ## Testing
 
 Tests lead — this codebase was built TDD and the discipline is worth keeping.
@@ -238,7 +289,7 @@ Tests lead — this codebase was built TDD and the discipline is worth keeping.
 - **E2E** (`test/e2e/`): full app via `createTestApp()`. Prefer this over hand-assembling a
   partial module — a subset without the global guards will happily miss auth bugs.
 
-Four behaviours have tests that exist because getting them wrong is subtle, and all four must
+Seven behaviours have tests that exist because getting them wrong is subtle, and all seven must
 keep passing:
 
 - a failed OTP attempt must **not** re-arm the code's TTL;
@@ -247,8 +298,16 @@ keep passing:
   operators (`test/integration/booking-concurrency.spec.ts`). More than 2 winners means
   `FOR UPDATE SKIP LOCKED` has been lost;
 - the booking state machine's test walks the **full cartesian product** — 7 statuses x 6
-  events x 4 actors = 168 cells, 14 allowed and 154 rejected. Adding a status or an event
-  means the grid-coverage assertion fails until the table is updated.
+  events x 4 actors = 168 cells, 15 allowed and 153 rejected. Adding a status or an event
+  means the grid-coverage assertion fails until the table is updated;
+- **two concurrent readiness ticks must notify exactly once**
+  (`test/integration/readiness-scan.spec.ts`). Duplicate pushes are a bug users report rather
+  than monitoring;
+- **the sweep must not expire a booking inside its grace window**
+  (`test/integration/sweep-grace.spec.ts`);
+- **registering a live device token under a second user must revoke the first binding**
+  (`test/integration/device-tokens.spec.ts`) — one handset changing hands would otherwise
+  deliver the previous user's booking notifications to the new one.
 
 **Time-dependent fixtures must derive their tick from the clock, not a literal hour.**
 Discovery only offers `[now + BOOKING_LEAD_TIME_MIN, end of today)`, so a hard-coded
@@ -257,8 +316,9 @@ See `bookableTick()` in `test/e2e/discovery.spec.ts`. Where a case needs a delib
 imminent slot, floor to the grid rather than ceil — rounding up can push it out of the
 window under test.
 
-Stub only at the port boundary (`SmsProvider`). The OTP e2e tests read the real code out of
-`FakeSmsProvider`, so the whole protocol runs rather than being mocked away.
+Stub only at the port boundary (`SmsProvider`, `PushProvider`). The OTP e2e tests read the
+real code out of `FakeSmsProvider`, and the notification tests read it out of
+`FakePushProvider`, so the whole path runs rather than being mocked away.
 
 ## Commits
 
@@ -274,13 +334,17 @@ history is the model. Don't amend; add commits.
   vendor docs before relying on it.
 - Non-Israeli numbers are rejected at OTP request with `PHONE_COUNTRY_UNSUPPORTED`. Provider
   routing by country is deferred; the port already accommodates it.
-- No job queue, media pipeline, or payments yet — sub-projects #3–#5, unplanned.
-- **The expiry sweep is admin-triggered only** (`POST /admin/maintenance/sweep-expired`).
-  `MaintenanceService.sweepExpired(now?)` takes an injectable clock precisely so #3 can put a
-  BullMQ schedule in front of it without touching the logic.
-- **No readiness reminders yet**, which is why `START` is permitted straight from `confirmed`
-  as well as `customer_ready`. Until #3 sends the reminder, a missing customer
-  acknowledgement must never block a real session. Don't "tighten" that rule first.
+- No media pipeline or payments yet — sub-projects #4–#5, unplanned.
+- **`START` is still permitted straight from `confirmed`.** The reason changed: readiness
+  notifications exist now, but if the worker is down no notification is sent, and a customer
+  who was never asked must not be blocked from their session. The feature degrades to phase 2
+  behaviour under outage. Don't "tighten" this.
+- **Push delivery receipts are not read.** An accepted send counts as delivered; Expo reports
+  real outcomes only via its receipts endpoint, polled minutes later.
+- **No operator nudge** when an acknowledgement never arrives. The operator is at the location
+  with the app open and the booking screen shows the state.
+- **No notification preferences or quiet hours.** Everything sent is transactional and follows
+  directly from the user's own booking, so there is nothing yet to opt out of.
 - **`late_cancellation` is recorded but never charged.** Payment happens after the session,
   so there is nothing to penalise in the MVP; the flag exists for whatever #5 decides.
 - **`GET /bookings` is party-scoped and refuses admins.** An unfiltered dump of every booking

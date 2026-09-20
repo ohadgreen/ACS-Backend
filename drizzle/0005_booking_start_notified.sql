@@ -1,0 +1,2 @@
+ALTER TABLE "bookings" ADD COLUMN "start_notified_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "bookings_start_notify_idx" ON "bookings" USING btree ("start_at") WHERE status = 'confirmed' AND start_notified_at IS NULL;

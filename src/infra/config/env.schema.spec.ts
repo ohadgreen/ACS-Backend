@@ -73,3 +73,35 @@ describe('envSchema', () => {
     expect(() => envSchema.parse({ ...required, SMS_PROVIDER: 'carrier-pigeon' })).toThrow();
   });
 });
+
+describe('phase 3 configuration', () => {
+  const base = {
+    DATABASE_URL: 'postgres://localhost/acs',
+    REDIS_URL: 'redis://localhost:6379',
+    JWT_SECRET: 'x'.repeat(32),
+    OTP_SECRET: 'y'.repeat(32),
+    SMS_PROVIDER: 'fake',
+  };
+
+  it('defaults the push and queue settings', () => {
+    const env = envSchema.parse(base);
+    expect(env.PUSH_PROVIDER).toBe('expo');
+    expect(env.QUEUE_PREFIX).toBe('acs');
+    expect(env.SCHEDULER_TICK_SEC).toBe(15);
+    expect(env.WORKER_CONCURRENCY).toBe(5);
+  });
+
+  it('rejects an unknown push provider', () => {
+    expect(() => envSchema.parse({ ...base, PUSH_PROVIDER: 'onesignal' })).toThrow();
+  });
+
+  // Unlike the SMS credentials, Expo needs no access token unless the project
+  // has enabled enhanced push security, so the schema must not demand one.
+  it('accepts PUSH_PROVIDER=expo with no access token', () => {
+    expect(() => envSchema.parse({ ...base, PUSH_PROVIDER: 'expo' })).not.toThrow();
+  });
+
+  it('coerces the tick interval from a string', () => {
+    expect(envSchema.parse({ ...base, SCHEDULER_TICK_SEC: '30' }).SCHEDULER_TICK_SEC).toBe(30);
+  });
+});

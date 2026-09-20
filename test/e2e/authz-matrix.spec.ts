@@ -48,7 +48,7 @@ export const PROTECTED_ROUTES: Array<{
   { method: 'get', path: '/operators/me/schedule', allow: ['operator'] },
 
   { method: 'post', path: '/bookings', allow: ['customer'], body: {} },
-  { method: 'post', path: `/bookings/${uuidv7()}/ack`, allow: ['customer'] },
+  { method: 'post', path: `/bookings/${uuidv7()}/ack`, allow: ['customer', 'operator'] },
   { method: 'post', path: `/bookings/${uuidv7()}/start`, allow: ['operator'] },
   { method: 'post', path: `/bookings/${uuidv7()}/end`, allow: ['operator'] },
   {
@@ -60,6 +60,19 @@ export const PROTECTED_ROUTES: Array<{
   { method: 'post', path: `/bookings/${uuidv7()}/no-show`, allow: ['operator'] },
   { method: 'get', path: '/bookings', allow: ['customer', 'operator'] },
   { method: 'get', path: `/bookings/${uuidv7()}`, allow: ['customer', 'operator', 'admin'] },
+
+  {
+    method: 'post',
+    path: '/me/devices',
+    allow: ['customer', 'operator', 'admin'],
+    body: { token: 'ExponentPushToken[matrix]', platform: 'ios' },
+  },
+  {
+    method: 'post',
+    path: '/me/devices/revoke',
+    allow: ['customer', 'operator', 'admin'],
+    body: { token: 'ExponentPushToken[matrix]' },
+  },
 
   { method: 'post', path: '/admin/maintenance/sweep-expired', allow: ['admin'] },
 ];
@@ -110,6 +123,6 @@ describe('authorization matrix', () => {
   it('covers every route that is not explicitly @Public', () => {
     // A reminder rather than a reflection trick: when this count changes,
     // a row was added or a route was left out.
-    expect(PROTECTED_ROUTES).toHaveLength(24);
+    expect(PROTECTED_ROUTES).toHaveLength(26);
   });
 });

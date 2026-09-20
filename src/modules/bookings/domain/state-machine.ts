@@ -20,9 +20,13 @@ interface Rule {
  * product, so any cell not listed here is provably rejected.
  */
 const RULES: Record<BookingEvent, Rule> = {
+  // The operator may acknowledge on the customer's behalf: they are standing
+  // next to them and are the best available evidence the customer showed up.
+  // The event keeps its name — it records that the customer is present, and
+  // the operator is a witness to that fact, not a second kind of event.
   CUSTOMER_ACK: {
     from: ['confirmed'],
-    actors: ['customer'],
+    actors: ['customer', 'operator'],
     next: 'customer_ready',
     stampField: 'readyAckAt',
   },

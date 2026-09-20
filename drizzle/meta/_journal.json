@@ -29,6 +29,20 @@
       "when": 1788858950804,
       "tag": "0003_bookings",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789645506501,
+      "tag": "0004_device_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789649919309,
+      "tag": "0005_booking_start_notified",
+      "breakpoints": true
     }
   ]
 }

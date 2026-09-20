@@ -4,12 +4,14 @@ import { RateLimitModule } from './common/rate-limit/rate-limit.module';
 import { AppLoggerModule } from './common/logging/logger.module';
 import { AppConfigModule } from './infra/config/config.module';
 import { DrizzleModule } from './infra/db/drizzle.module';
+import { QueueModule } from './infra/queue/queue.module';
 import { RedisModule } from './infra/redis/redis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { DiscoveryModule } from './modules/discovery/discovery.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { OperatorsModule } from './modules/operators/operators.module';
 import { PresenceModule } from './modules/presence/presence.module';
 import { SmsModule } from './modules/sms/sms.module';
@@ -24,6 +26,7 @@ import { UsersModule } from './modules/users/users.module';
     RateLimitModule,
     DrizzleModule,
     RedisModule,
+    QueueModule,
     UsersModule,
     SmsModule,
     AuthModule,
@@ -32,6 +35,7 @@ import { UsersModule } from './modules/users/users.module';
     PresenceModule,
     DiscoveryModule,
     BookingsModule,
+    NotificationsModule,
     MaintenanceModule,
     HealthModule,
   ],

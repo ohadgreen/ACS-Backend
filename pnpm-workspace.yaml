@@ -2,6 +2,7 @@ allowBuilds:
   '@scarf/scarf': true
   '@swc/core': true
   esbuild: true
+  msgpackr-extract: false
 
 minimumReleaseAgeExclude:
   - multer@2.4.0

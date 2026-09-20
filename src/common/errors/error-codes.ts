@@ -34,6 +34,8 @@ export const ErrorCodes = {
   PHONE_NOT_VERIFIED: 'PHONE_NOT_VERIFIED',
   INVALID_TRANSITION: 'INVALID_TRANSITION',
   ACTOR_NOT_PERMITTED: 'ACTOR_NOT_PERMITTED',
+
+  DEVICE_NOT_FOUND: 'DEVICE_NOT_FOUND',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

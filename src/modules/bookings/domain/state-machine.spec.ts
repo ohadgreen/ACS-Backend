@@ -34,6 +34,7 @@ const JUST_BEFORE = ctx('2026-09-06T09:58:00.000Z');
 /** Every cell the spec's table fills in. */
 const ALLOWED: Array<[BookingStatus, BookingEvent, ActorKind, BookingStatus]> = [
   ['confirmed', 'CUSTOMER_ACK', 'customer', 'customer_ready'],
+  ['confirmed', 'CUSTOMER_ACK', 'operator', 'customer_ready'],
   ['confirmed', 'START', 'operator', 'in_progress'],
   ['customer_ready', 'START', 'operator', 'in_progress'],
   ['in_progress', 'END_SESSION', 'operator', 'completed'],

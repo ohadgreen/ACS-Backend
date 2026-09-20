@@ -50,11 +50,15 @@ export class BookingsController {
   // Every lifecycle route is 200: they transition an existing booking rather
   // than creating anything. The role guard narrows who may even reach the
   // state machine; the machine then decides whether the actor may do this now.
-  @Roles('customer')
+  // The operator is permitted so they can acknowledge on the customer's behalf
+  // when the customer does not answer the session-start notification. Ownership
+  // is unchanged: BookingsService.act still requires an operator caller to match
+  // the booking's operator_id.
+  @Roles('customer', 'operator')
   @Post(':id/ack')
   @HttpCode(200)
   ack(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.bookings.act(id, 'CUSTOMER_ACK', 'customer', user);
+    return this.bookings.act(id, 'CUSTOMER_ACK', user.role, user);
   }
 
   @Roles('operator')

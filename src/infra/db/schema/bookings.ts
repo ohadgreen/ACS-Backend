@@ -59,6 +59,9 @@ export const bookings = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     readyAckAt: timestamp('ready_ack_at', { withTimezone: true }),
+    // Both the idempotency record and the claim token for the readiness scan:
+    // the UPDATE that reads it also sets it, so two workers cannot both notify.
+    startNotifiedAt: timestamp('start_notified_at', { withTimezone: true }),
     startedAt: timestamp('started_at', { withTimezone: true }),
     sessionEndAt: timestamp('session_end_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
@@ -78,6 +81,13 @@ export const bookings = pgTable(
     uniqueIndex('customer_one_booking_per_tick')
       .on(t.customerId, t.startAt)
       .where(sql`status IN ${ACTIVE_STATUSES}`),
+    // Partial, so a row leaves the index the moment it is notified: the scan
+    // reads the pending set rather than the table, however large it grows.
+    // Bare column names — a table-qualified reference is invalid in
+    // CREATE INDEX ... WHERE.
+    index('bookings_start_notify_idx')
+      .on(t.startAt)
+      .where(sql`status = 'confirmed' AND start_notified_at IS NULL`),
   ],
 );
 
