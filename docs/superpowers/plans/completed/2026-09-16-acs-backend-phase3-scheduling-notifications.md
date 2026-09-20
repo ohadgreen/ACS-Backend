@@ -1,5 +1,41 @@
 # ACS Backend Phase 3 — Scheduling, Push Notifications & Session Readiness
 
+> **IMPLEMENTED — 2026-09-20.** Tasks 1–14 are all in the branch's history.
+> This file is kept as the record of what was followed, not as documentation:
+> read `AGENTS.md` and the code for how the system works now.
+>
+> Every deviation from this plan is recorded in the commit that made it, with
+> the reason. The substantive ones, for anyone reading the plan on its own:
+>
+> - **Every scan fixture in Tasks 9, 11 and 12 was written upside down.** The
+>   plan pinned `now` and moved `start_at` to off-grid offsets (11:59, 11:46,
+>   11:44); `operator_slots.grid_aligned` rejects all three, so all twelve
+>   readiness cases failed on insert before asserting anything. The booking is
+>   now pinned to a real 15-minute tick and each case moves the scan's `now`,
+>   which is also the truthful arrangement — a session's start is fixed by the
+>   grid, the tick fires at an arbitrary moment. The window boundaries under
+>   test are unchanged.
+> - **Task 10's e2e test asserted `res.body.code`.** This API nests errors
+>   under `error`, as `booking-lifecycle.spec.ts` already asserted. It also
+>   seeded `startAt: new Date()`, the same grid problem as above.
+> - **`PUSH_SEND_FAILED` was not added to `ErrorCodes`.** That file is the
+>   client contract and the code never reaches a client; it is a plain
+>   `PushSendError`.
+> - **`notify()`'s third argument is the push data payload, not template
+>   parameters.** Neither template interpolates anything, so parameter plumbing
+>   would have had no consumer, while the client does need a `bookingId` to
+>   open the right screen.
+> - **The tick uses `upsertJobScheduler`** rather than the manual
+>   repeatable-job cleanup on boot the plan's trap list called for, which
+>   removes the stale-schedule trap instead of documenting it.
+> - **The generated migration was renamed** from drizzle-kit's random
+>   `0004_mighty_jackal` to `0004_device_tokens`, matching every prior
+>   migration. The SQL bytes are unchanged, so the content-hash tracker does
+>   not re-apply it.
+> - **Task 11's correction needed no change to `test/e2e/expiry-sweep.spec.ts`**,
+>   which the plan anticipated it might: that suite already seeded bookings
+>   well past their window.
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship the background worker, the job queue, and push notifications, and use them to notify a customer at session start and let the operator acknowledge on their behalf.
